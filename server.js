@@ -21,7 +21,7 @@ const allowedOrigins = [
   process.env.PUBLIC_URL_LOCAL,
   process.env.ADMIN_URL_LOCAL,
   process.env.PUBLIC_URL_PROD,
-  process.env.ADMIN_URL_PROD
+  process.env.ADMIN_URL_PROD,
 ];
 // === CORS Setup ===
 // app.use(cors({
