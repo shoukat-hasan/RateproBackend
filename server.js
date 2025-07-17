@@ -15,9 +15,11 @@ connectDB();
 
 const app = express();
 
+app.set("trust proxy", 1);
+
 const allowedOrigins = [
   process.env.FRONTEND_URL,
-  process.env.PRI_FRONTEND_URL,
+  process.env.PRI_FRONTEND_URL_LOCAL,
   process.env.SEC_FRONTEND_URL_LOCAL,
   process.env.RATEPRO_URL
 ];
