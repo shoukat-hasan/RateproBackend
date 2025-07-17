@@ -11,9 +11,51 @@ const moment = require("moment");
 // === Helper: Generate OTP Code ===
 const generateOTP = () => Math.floor(100000 + Math.random() * 900000).toString();
 
+// exports.registerUser = async (req, res, next) => {
+//     try {
+//         const { name, email, password, role, source = "public" } = req.body;
+
+//         const userExists = await User.findOne({ email });
+//         if (userExists) return res.status(400).json({ message: "Email already registered" });
+
+//         const hashedPassword = await bcrypt.hash(password, 12);
+//         const user = await User.create({ name, email, password: hashedPassword, role });
+
+//         const otpCode = generateOTP();
+//         const expiresAt = moment().add(process.env.OTP_EXPIRE_MINUTES, 'minutes').toDate();
+
+//         await OTP.create({ email, code: otpCode, expiresAt, purpose: "verify" });
+
+//         // const link = `${process.env.FRONTEND_URL}/verify-email?code=${otpCode}&email=${email}`;
+
+//         // ✅ Choose base URL based on `source`
+//         const baseURL = source === "admin"
+//             ? process.env.FRONTEND_URL
+//             : process.env.PUBLIC_FRONTEND_URL;
+
+//         const link = `${baseURL}/verify-email?code=${otpCode}&email=${email}`;
+
+//         await sendEmail({
+//             to: email,
+//             subject: "Verify Your Email",
+//             html: `
+//     <p>Hello ${name || "user"},</p>
+//     <p>Your verification code is: <b>${otpCode}</b></p>
+//     <p>Or click this link to verify directly: <a href="${link}">${link}</a></p>
+//     <p>This link/code will expire in ${process.env.OTP_EXPIRE_MINUTES} minute(s).</p>
+//   `
+//         });
+
+
+//         res.status(201).json({ message: "User registered. verification link sent to email." });
+
+//     } catch (err) {
+//         next(err);
+//     }
+// };
 exports.registerUser = async (req, res, next) => {
     try {
-        const { name, email, password, role, source = "public" } = req.body;
+        const { name, email, password, role } = req.body;
 
         const userExists = await User.findOne({ email });
         if (userExists) return res.status(400).json({ message: "Email already registered" });
@@ -26,21 +68,13 @@ exports.registerUser = async (req, res, next) => {
 
         await OTP.create({ email, code: otpCode, expiresAt, purpose: "verify" });
 
-        // const link = `${process.env.FRONTEND_URL}/verify-email?code=${otpCode}&email=${email}`;
-
-        // ✅ Choose base URL based on `source`
-        const baseURL = source === "admin"
-            ? process.env.FRONTEND_URL
-            : process.env.PUBLIC_FRONTEND_URL;
-
-        const link = `${baseURL}/verify-email?code=${otpCode}&email=${email}`;
+        const link = `${process.env.RATEPRO_URL}/verify-email?code=${otpCode}&email=${email}`;
 
         await sendEmail({
             to: email,
             subject: "Verify Your Email",
             html: `
     <p>Hello ${name || "user"},</p>
-    <p>Your verification code is: <b>${otpCode}</b></p>
     <p>Or click this link to verify directly: <a href="${link}">${link}</a></p>
     <p>This link/code will expire in ${process.env.OTP_EXPIRE_MINUTES} minute(s).</p>
   `
@@ -51,8 +85,11 @@ exports.registerUser = async (req, res, next) => {
 
     } catch (err) {
         next(err);
-    }
+    }
 };
+
+
+
 exports.verifyEmailLink = async (req, res, next) => {
     try {
         const { code, email } = req.query;
@@ -187,7 +224,6 @@ exports.loginUser = async (req, res, next) => {
             });
         }
 
-
         const accessToken = generateToken(user._id, "access");
         const refreshToken = generateToken(user._id, "refresh");
 
@@ -217,7 +253,20 @@ exports.loginUser = async (req, res, next) => {
             maxAge: 15 * 60 * 1000, // 15 minutes
         });
 
-        res.status(200).json({ accessToken, user });
+        // res.status(200).json({ accessToken, user });
+        res.status(200).json({
+            accessToken,
+            user: {
+                _id: user._id,
+                name: user.name,
+                email: user.email,
+                role: user.role,
+                avatar: user.avatar,
+                isEmailVerified: user.isVerified,
+                lastLogin: user.lastLogin,
+                createdAt: user.createdAt
+            }
+        });
 
     } catch (err) {
         next(err);
