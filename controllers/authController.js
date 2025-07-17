@@ -136,6 +136,8 @@ exports.verifyEmailLink = async (req, res, next) => {
 exports.verifyEmail = async (req, res, next) => {
     try {
         const { email, code } = req.body;
+        console.log("BODY:", req.body);
+        if (!email || !code) return res.status(400).json({ message: "Missing code or email" });
 
         const otp = await OTP.findOne({ email, code, purpose: "verify" });
         if (!otp) return res.status(400).json({ message: "Invalid OTP" });
