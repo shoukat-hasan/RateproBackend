@@ -191,17 +191,31 @@ exports.loginUser = async (req, res, next) => {
         const accessToken = generateToken(user._id, "access");
         const refreshToken = generateToken(user._id, "refresh");
 
+        // res.cookie("refreshToken", refreshToken, {
+        //     httpOnly: true,
+        //     secure: process.env.NODE_ENV === "production",
+        //     maxAge: 30 * 24 * 60 * 60 * 1000,
+        // });
+
+        // res.cookie("token", accessToken, {
+        //     httpOnly: true,
+        //     secure: process.env.NODE_ENV === "production",
+        //     maxAge: 15 * 60 * 1000, // 15 minutes
+        // })
+
         res.cookie("refreshToken", refreshToken, {
             httpOnly: true,
             secure: process.env.NODE_ENV === "production",
-            maxAge: 30 * 24 * 60 * 60 * 1000,
+            sameSite: process.env.NODE_ENV === "production" ? "None" : "Lax", // ✅ key fix
+            maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
         });
 
         res.cookie("token", accessToken, {
             httpOnly: true,
             secure: process.env.NODE_ENV === "production",
+            sameSite: process.env.NODE_ENV === "production" ? "None" : "Lax", // ✅ key fix
             maxAge: 15 * 60 * 1000, // 15 minutes
-        })
+        });
 
         res.status(200).json({ accessToken, user });
 

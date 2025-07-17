@@ -23,8 +23,6 @@ const allowedOrigins = [
   process.env.SEC_FRONTEND_URL_LOCAL,
   process.env.RATEPRO_URL
 ];
-console.log("Allowed Origins:", allowedOrigins)
-
 // === CORS Setup ===
 // app.use(cors({
 //   origin: [process.env.FRONTEND_URL, process.env.PUBLIC_FRONTEND_URL, process.env.RATEPRO_URL],
@@ -32,7 +30,6 @@ console.log("Allowed Origins:", allowedOrigins)
 // }));
 app.use(cors({
   origin: function (origin, callback) {
-    console.log("Origin Attempting CORS:", origin);
     if (!origin || allowedOrigins.includes(origin)) {
       callback(null, true);
     } else {
