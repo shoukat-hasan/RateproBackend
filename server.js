@@ -17,7 +17,8 @@ const app = express();
 
 const allowedOrigins = [
   process.env.FRONTEND_URL,
-  process.env.PUBLIC_FRONTEND_URL,
+  process.env.PRI_FRONTEND_URL,
+  process.env.SEC_FRONTEND_URL_LOCAL,
   process.env.RATEPRO_URL
 ];
 console.log("Allowed Origins:", allowedOrigins)
