@@ -35,10 +35,10 @@ exports.protect = async (req, res, next) => {
   if (req.headers.authorization?.startsWith("Bearer")) {
     token = req.headers.authorization.split(" ")[1];
     tokenType = "access";
-  } else if (req.cookies?.refreshToken) {
-    token = req.cookies.refreshToken;
-    tokenType = "refresh";
-  }
+  } else if (req.cookies?.token) {
+    token = req.cookies.token;
+    tokenType = "access"; // still verify with JWT_SECRET
+  } 
 
   if (!token) return res.status(401).json({ message: "Not authorized, token missing" });
 
