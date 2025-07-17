@@ -75,6 +75,10 @@ exports.registerUser = async (req, res, next) => {
             source = "admin";
         }
 
+        if (!role || !["user", "company", "admin"].includes(role)) {
+            return res.status(400).json({ message: "Invalid or missing role" });
+        }
+
         const urls = getBaseURL();
         const baseURL = source === "admin" ? urls.admin : urls.public;
 
