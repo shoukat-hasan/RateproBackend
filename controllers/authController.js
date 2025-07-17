@@ -85,7 +85,7 @@ exports.registerUser = async (req, res, next) => {
 
     } catch (err) {
         next(err);
-    }
+    }
 };
 
 
@@ -202,10 +202,22 @@ exports.loginUser = async (req, res, next) => {
             const expiresAt = moment().add(process.env.EMAIL_VERIFICATION_EXPIRE_DAYS, 'days').toDate();
 
             await OTP.create({ email, code: otpCode, expiresAt, purpose: "verify" });
-            const baseURL = source === "admin"
-                ? process.env.FRONTEND_URL
-                : process.env.PUBLIC_FRONTEND_URL;
+            // const baseURL = source === "admin"
+            //     ? process.env.FRONTEND_URL
+            //     : process.env.RATEPRO_URL
+            //     : process.env.PRI_FRONTEND_URL_LOCAL
+            //     : process.env.SEC_FRONTEND_URL_LOCAL;
 
+            // const link = `${baseURL}/verify-email?code=${otpCode}&email=${email}`;
+
+            const sourceMap = {
+                admin: process.env.FRONTEND_URL,
+                ratepro: process.env.RATEPRO_URL,
+                pri: process.env.PRI_FRONTEND_URL_LOCAL,
+                sec: process.env.SEC_FRONTEND_URL_LOCAL
+            };
+
+            const baseURL = sourceMap[source] || process.env.FRONTEND_URL;
             const link = `${baseURL}/verify-email?code=${otpCode}&email=${email}`;
 
             // const link = `${process.env.FRONTEND_URL}/verify-email?code=${otpCode}&email=${email}`;
