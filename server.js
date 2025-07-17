@@ -60,8 +60,6 @@ app.use(
   })
 );
 
-app.options("*", cors()); // handle preflight requests
-
 // === Body & Cookie Parsers ===
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true, limit: "10mb" }));
