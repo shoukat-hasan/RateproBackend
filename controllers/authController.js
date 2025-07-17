@@ -69,6 +69,12 @@ exports.registerUser = async (req, res, next) => {
 
         await OTP.create({ email, code: otpCode, expiresAt, purpose: "verify" });
 
+        const origin = req.headers.origin || "";
+        let source = "public";
+        if (origin.includes("admin") && (role === "admin" || role === "company")) {
+            source = "admin";
+        }
+
         const urls = getBaseURL();
         const baseURL = source === "admin" ? urls.admin : urls.public;
 
