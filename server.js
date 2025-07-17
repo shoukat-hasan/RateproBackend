@@ -1,5 +1,5 @@
 // server.js
-
+require("dotenv").config();
 const express = require("express");
 const dotenv = require("dotenv");
 const connectDB = require("./config/db");
@@ -15,10 +15,27 @@ connectDB();
 
 const app = express();
 
+const allowedOrigins = [
+  process.env.FRONTEND_URL,
+  process.env.PUBLIC_FRONTEND_URL,
+  process.env.RATEPRO_URL
+];
+console.log("Allowed Origins:", allowedOrigins)
+
 // === CORS Setup ===
+// app.use(cors({
+//   origin: [process.env.FRONTEND_URL, process.env.PUBLIC_FRONTEND_URL, process.env.RATEPRO_URL],
+//   credentials: true
+// }));
 app.use(cors({
-  origin: [process.env.FRONTEND_URL, process.env.RATEPRO_URL],
-  credentials: true
+  origin: function (origin, callback) {
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error("Not allowed by CORS"));
+    }
+  },
+  credentials: true,
 }));
 
 

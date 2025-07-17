@@ -13,7 +13,7 @@ const generateOTP = () => Math.floor(100000 + Math.random() * 900000).toString()
 
 exports.registerUser = async (req, res, next) => {
     try {
-        const { name, email, password, role } = req.body;
+        const { name, email, password, role, source = "public" } = req.body;
 
         const userExists = await User.findOne({ email });
         if (userExists) return res.status(400).json({ message: "Email already registered" });
@@ -26,7 +26,14 @@ exports.registerUser = async (req, res, next) => {
 
         await OTP.create({ email, code: otpCode, expiresAt, purpose: "verify" });
 
-        const link = `${process.env.FRONTEND_URL}/verify-email?code=${otpCode}&email=${email}`;
+        // const link = `${process.env.FRONTEND_URL}/verify-email?code=${otpCode}&email=${email}`;
+
+        // ✅ Choose base URL based on `source`
+        const baseURL = source === "admin"
+            ? process.env.FRONTEND_URL
+            : process.env.PUBLIC_FRONTEND_URL;
+
+        const link = `${baseURL}/verify-email?code=${otpCode}&email=${email}`;
 
         await sendEmail({
             to: email,
@@ -57,18 +64,21 @@ exports.verifyEmailLink = async (req, res, next) => {
             return res.redirect(`${process.env.FRONTEND_URL}/login?message=otp-expired`);
         }
 
-        await User.findOneAndUpdate({ email }, { isVerified: true });
+        // await User.findOneAndUpdate({ email }, { isVerified: true });
+        const user = await User.findOneAndUpdate({ email }, { isVerified: true }, { new: true });
+        const baseURL = user?.role === "admin" || user?.role === "company"
+            ? process.env.FRONTEND_URL
+            : process.env.PUBLIC_FRONTEND_URL;
         await OTP.deleteMany({ email, purpose: "verify" });
 
-        return res.redirect(`${process.env.FRONTEND_URL}/login?message=verified`);
+        // return res.redirect(`${process.env.FRONTEND_URL}/login?message=verified`);
+        return res.redirect(`${baseURL}/login?message=verified`);
 
     } catch (err) {
         console.log(err);
         return res.redirect(`${process.env.FRONTEND_URL}/login?message=error`);
     }
 };
-
-
 exports.verifyEmail = async (req, res, next) => {
     try {
         const { email, code } = req.body;
@@ -91,7 +101,8 @@ exports.verifyEmail = async (req, res, next) => {
 
 exports.resendOtp = async (req, res, next) => {
     try {
-        const { email, purpose } = req.body;
+        // const { email, purpose } = req.body;
+        const { email, purpose, source = "public" } = req.body;
 
         const user = await User.findOne({ email });
         if (!user) return res.status(404).json({ message: "User not found" });
@@ -103,11 +114,32 @@ exports.resendOtp = async (req, res, next) => {
 
         await OTP.create({ email, code: otpCode, expiresAt, purpose });
 
-        await sendEmail({
-            to: email,
-            subject: `OTP Code for ${purpose}`,
-            text: `Your new OTP Code is: ${otpCode}`
-        });
+        // await sendEmail({
+        //     to: email,
+        //     subject: `OTP Code for ${purpose}`,
+        //     text: `Your new OTP Code is: ${otpCode}`
+        // });
+
+        let emailContent = { to: email };
+
+        if (purpose === "verify") {
+            const baseURL = source === "admin"
+                ? process.env.FRONTEND_URL
+                : process.env.PUBLIC_FRONTEND_URL;
+
+            const link = `${baseURL}/verify-email?code=${otpCode}&email=${email}`;
+
+            emailContent.subject = "Verify Your Email";
+            emailContent.html = `
+    <p>Your new verification code: <b>${otpCode}</b></p>
+    <p>Or click the link: <a href="${link}">${link}</a></p>
+  `;
+        } else {
+            emailContent.subject = `OTP Code for ${purpose}`;
+            emailContent.text = `Your OTP Code: ${otpCode}`;
+        }
+
+        await sendEmail(emailContent);
 
         res.status(200).json({ message: "OTP resent to email" });
 
@@ -118,7 +150,8 @@ exports.resendOtp = async (req, res, next) => {
 
 exports.loginUser = async (req, res, next) => {
     try {
-        const { email, password } = req.body;
+        // const { email, password } = req.body;
+        const { email, password, source = "public" } = req.body;
 
         const user = await User.findOne({ email });
         if (!user || !(await bcrypt.compare(password, user.password)))
@@ -132,8 +165,13 @@ exports.loginUser = async (req, res, next) => {
             const expiresAt = moment().add(process.env.EMAIL_VERIFICATION_EXPIRE_DAYS, 'days').toDate();
 
             await OTP.create({ email, code: otpCode, expiresAt, purpose: "verify" });
+            const baseURL = source === "admin"
+                ? process.env.FRONTEND_URL
+                : process.env.PUBLIC_FRONTEND_URL;
 
-            const link = `${process.env.FRONTEND_URL}/verify-email?code=${otpCode}&email=${email}`;
+            const link = `${baseURL}/verify-email?code=${otpCode}&email=${email}`;
+
+            // const link = `${process.env.FRONTEND_URL}/verify-email?code=${otpCode}&email=${email}`;
             await sendEmail({
                 to: email,
                 subject: "Verify Your Email Again",
@@ -159,6 +197,12 @@ exports.loginUser = async (req, res, next) => {
             maxAge: 30 * 24 * 60 * 60 * 1000,
         });
 
+        res.cookie("token", accessToken, {
+            httpOnly: true,
+            secure: process.env.NODE_ENV === "production",
+            maxAge: 15 * 60 * 1000, // 15 minutes
+        })
+
         res.status(200).json({ accessToken, user });
 
     } catch (err) {
@@ -177,7 +221,9 @@ exports.forgotPassword = async (req, res, next) => {
         const expiresAt = moment().add(process.env.OTP_EXPIRE_MINUTES, 'minutes').toDate();
 
         await OTP.deleteMany({ email, purpose: "reset" });
-        await OTP.create({ email, code: otpCode, expiresAt, purpose: "reset" });
+        console.log("Saving OTP to DB...");
+        const savedOTP = await OTP.create({ email, code: otpCode, expiresAt, purpose: "reset" });
+        console.log("Saved OTP:", savedOTP);
 
         await sendEmail({
             to: email,
@@ -188,18 +234,46 @@ exports.forgotPassword = async (req, res, next) => {
         res.status(200).json({ message: "OTP sent for password reset" });
 
     } catch (err) {
+        console.error("OTP DB Error:", err);
         next(err);
     }
 };
 
+// exports.resetPassword = async (req, res, next) => {
+//     try {
+//         const { email, code, newPassword } = req.body;
+
+//         const otp = await OTP.findOne({ email, code, purpose: "reset" });
+//         if (!otp) return res.status(400).json({ message: "Invalid OTP" });
+//         if (otp.expiresAt < new Date())
+//             return res.status(400).json({ message: "OTP expired" });
+
+//         const hashed = await bcrypt.hash(newPassword, 12);
+//         await User.findOneAndUpdate({ email }, { password: hashed });
+//         await OTP.deleteMany({ email, purpose: "reset" });
+
+//         res.status(200).json({ message: "Password reset successful" });
+
+//     } catch (err) {
+//         next(err);
+//     }
+// };
+
 exports.resetPassword = async (req, res, next) => {
+    console.log("🔥 Reset password route hit");
     try {
         const { email, code, newPassword } = req.body;
 
+        console.log("Incoming:", { email, code, newPassword });
+
         const otp = await OTP.findOne({ email, code, purpose: "reset" });
+        console.log("Found OTP:", otp);
+
         if (!otp) return res.status(400).json({ message: "Invalid OTP" });
-        if (otp.expiresAt < new Date())
+
+        if (otp.expiresAt < new Date()) {
             return res.status(400).json({ message: "OTP expired" });
+        }
 
         const hashed = await bcrypt.hash(newPassword, 12);
         await User.findOneAndUpdate({ email }, { password: hashed });
@@ -208,6 +282,7 @@ exports.resetPassword = async (req, res, next) => {
         res.status(200).json({ message: "Password reset successful" });
 
     } catch (err) {
+        console.error("Reset password error:", err);
         next(err);
     }
 };
@@ -252,4 +327,66 @@ exports.updateProfile = async (req, res, next) => {
 exports.logoutUser = (req, res) => {
     res.clearCookie("refreshToken");
     res.status(200).json({ message: "Logged out successfully" });
+};
+
+exports.verifyResetCode = async (req, res) => {
+    const { email, code } = req.body;
+
+    try {
+        // Find OTP in OTP collection
+        const otpRecord = await OTP.findOne({
+            email,
+            code,
+            purpose: "reset",
+            expiresAt: { $gt: new Date() },
+        });
+
+        if (!otpRecord) {
+            return res.status(400).json({ message: "Invalid or expired code" });
+        }
+
+        return res.status(200).json({ message: "OTP verified. You can reset your password now." });
+    } catch (error) {
+        console.error("Verify reset code error:", error);
+        return res.status(500).json({ message: "Server error" });
+    }
+};
+
+exports.getMe = async (req, res, next) => {
+    try {
+        const user = await User.findById(req.user._id).select("-password");
+        if (!user) return res.status(404).json({ message: "User not found" });
+
+        res.status(200).json({ success: true, user });
+    } catch (err) {
+        console.error("getMe error:", err);
+        res.status(500).json({ message: "Server error" });
+    }
+};
+
+exports.updatePasswordWithOTPRequest = async (req, res, next) => {
+    try {
+        const { currentPassword, newPassword } = req.body;
+        const user = await User.findById(req.user._id);
+
+        const isMatch = await bcrypt.compare(currentPassword, user.password);
+        if (!isMatch) return res.status(400).json({ message: "Current password is incorrect" });
+
+        const code = generateOTP();
+        const expiresAt = moment().add(10, "minutes").toDate();
+
+        await OTP.create({ email: user.email, code, expiresAt, purpose: "reset" });
+
+        await sendEmail({
+            to: user.email,
+            subject: "Confirm Password Change",
+            html: `<p>Your OTP code is: <b>${code}</b></p>`
+        });
+
+        // Store newPassword temporarily in session/cache/db if needed
+        res.status(200).json({ message: "OTP sent to your email" });
+
+    } catch (err) {
+        next(err);
+    }
 };

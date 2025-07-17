@@ -186,3 +186,33 @@ exports.sendNotification = async (req, res, next) => {
     next(err);
   }
 };
+
+// controllers/userController.js
+exports.updateMe = async (req, res, next) => {
+  try {
+    const updates = [
+      "name",
+      "email",
+      "phone",
+      "department",
+      "bio",
+      "timezone",
+      "language"
+    ];
+
+    const user = await User.findById(req.user._id);
+    if (!user) return res.status(404).json({ message: "User not found" });
+
+    updates.forEach(field => {
+      if (req.body[field] !== undefined) {
+        user[field] = req.body[field];
+      }
+    });
+
+    await user.save();
+    res.status(200).json({ message: "Profile updated", user });
+  } catch (err) {
+    next(err);
+  }
+};
+
