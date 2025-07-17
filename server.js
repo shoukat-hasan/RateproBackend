@@ -17,28 +17,48 @@ const app = express();
 
 app.set("trust proxy", 1);
 
-const allowedOrigins = [
-  process.env.PUBLIC_URL_LOCAL,
-  process.env.ADMIN_URL_LOCAL,
-  process.env.PUBLIC_URL_PROD,
-  process.env.ADMIN_URL_PROD,
-];
+// const allowedOrigins = [
+//   process.env.PUBLIC_URL_LOCAL,
+//   process.env.ADMIN_URL_LOCAL,
+//   process.env.PUBLIC_URL_PROD,
+//   process.env.ADMIN_URL_PROD,
+// ];
 // === CORS Setup ===
 // app.use(cors({
 //   origin: [process.env.FRONTEND_URL, process.env.PUBLIC_FRONTEND_URL, process.env.RATEPRO_URL],
 //   credentials: true
 // }));
-app.use(cors({
-  origin: function (origin, callback) {
-    console.log('allowed Origins', allowedOrigins);
-    if (!origin || allowedOrigins.includes(origin)) {
-      callback(null, true);
-    } else {
-      callback(new Error("Not allowed by CORS"));
-    }
-  },
-  credentials: true,
-}));
+// app.use(cors({
+//   origin: function (origin, callback) {
+//     console.log('allowed Origins', allowedOrigins);
+//     if (!origin || allowedOrigins.includes(origin)) {
+//       callback(null, true);
+//     } else {
+//       callback(new Error("Not allowed by CORS"));
+//     }
+//   },
+//   credentials: true,
+// }));
+const allowedOrigins = [
+  "http://localhost:5173",
+  "http://localhost:5174",
+  "https://rate-pro-admin.vercel.app",
+  "https://ratepro-public.vercel.app"
+];
+
+app.use(
+  cors({
+    origin: function (origin, callback) {
+      // allow requests with no origin (like mobile apps, curl, Postman)
+      if (!origin || allowedOrigins.includes(origin)) {
+        callback(null, true);
+      } else {
+        callback(new Error("Not allowed by CORS"));
+      }
+    },
+    credentials: true, // allow cookies, auth headers
+  })
+);
 
 
 
