@@ -18,10 +18,10 @@ const app = express();
 app.set("trust proxy", 1);
 
 const allowedOrigins = [
-  process.env.FRONTEND_URL,
-  process.env.PRI_FRONTEND_URL_LOCAL,
-  process.env.SEC_FRONTEND_URL_LOCAL,
-  process.env.RATEPRO_URL
+  process.env.PUBLIC_URL_LOCAL,
+  process.env.ADMIN_URL_LOCAL,
+  process.env.PUBLIC_URL_PROD,
+  process.env.ADMIN_URL_PROD
 ];
 // === CORS Setup ===
 // app.use(cors({

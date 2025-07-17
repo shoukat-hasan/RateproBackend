@@ -7,6 +7,7 @@ const generateToken = require("../utils/generateToken");
 const cloudinary = require("../utils/cloudinary");
 const crypto = require("crypto");
 const moment = require("moment");
+const getBaseURL = require("../utils/getBaseURL");
 
 // === Helper: Generate OTP Code ===
 const generateOTP = () => Math.floor(100000 + Math.random() * 900000).toString();
@@ -68,7 +69,11 @@ exports.registerUser = async (req, res, next) => {
 
         await OTP.create({ email, code: otpCode, expiresAt, purpose: "verify" });
 
-        const link = `${process.env.RATEPRO_URL}/verify-email?code=${otpCode}&email=${email}`;
+        const urls = getBaseURL();
+        const baseURL = source === "admin" ? urls.admin : urls.public;
+
+        const link = `${baseURL}/verify-email?code=${otpCode}&email=${email}`
+        // const link = `${process.env.RATEPRO_URL}/verify-email?code=${otpCode}&email=${email}`;
 
         await sendEmail({
             to: email,
@@ -209,16 +214,10 @@ exports.loginUser = async (req, res, next) => {
             //     : process.env.SEC_FRONTEND_URL_LOCAL;
 
             // const link = `${baseURL}/verify-email?code=${otpCode}&email=${email}`;
+            const urls = getBaseURL();
+            const baseURL = source === "admin" ? urls.admin : urls.public;
 
-            const sourceMap = {
-                admin: process.env.FRONTEND_URL,
-                ratepro: process.env.RATEPRO_URL,
-                pri: process.env.PRI_FRONTEND_URL_LOCAL,
-                sec: process.env.SEC_FRONTEND_URL_LOCAL
-            };
-
-            const baseURL = sourceMap[source] || process.env.FRONTEND_URL;
-            const link = `${baseURL}/verify-email?code=${otpCode}&email=${email}`;
+            const link = `${baseURL}/verify-email?code=${otpCode}&email=${email}`
 
             // const link = `${process.env.FRONTEND_URL}/verify-email?code=${otpCode}&email=${email}`;
             await sendEmail({
