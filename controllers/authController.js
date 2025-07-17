@@ -139,8 +139,12 @@ exports.verifyEmail = async (req, res, next) => {
         console.log("BODY:", req.body);
         if (!email || !code) return res.status(400).json({ message: "Missing code or email" });
 
-        const otp = await OTP.findOne({ email, code, purpose: "verify" });
-        if (!otp) return res.status(400).json({ message: "Invalid OTP" });
+        // const otp = await OTP.findOne({ email, code, purpose: "verify" });
+        const otp = await OTP.findOne({ email, purpose: "verify" }).sort({ createdAt: -1 });
+        if (!otp || otp.code !== code)
+            return res.status(400).json({ message: "Invalid OTP" });
+
+        // if (!otp) return res.status(400).json({ message: "Invalid OTP" });
 
         if (otp.expiresAt < new Date())
             return res.status(400).json({ message: "OTP expired. Request a new one." });
