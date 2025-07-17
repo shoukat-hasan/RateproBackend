@@ -57,12 +57,14 @@ const generateOTP = () => Math.floor(100000 + Math.random() * 900000).toString()
 exports.registerUser = async (req, res, next) => {
     try {
         const { name, email, password, role } = req.body;
+        console.log("Received Role:", role);
 
         const userExists = await User.findOne({ email });
         if (userExists) return res.status(400).json({ message: "Email already registered" });
 
         const hashedPassword = await bcrypt.hash(password, 12);
         const user = await User.create({ name, email, password: hashedPassword, role });
+        console.log("Saved User:", user);
 
         const otpCode = generateOTP();
         const expiresAt = moment().add(process.env.OTP_EXPIRE_MINUTES, 'minutes').toDate();
