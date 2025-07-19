@@ -8,7 +8,6 @@ const { authLimiter } = require("../middlewares/rateLimiter");
 
 const {
   registerUser,
-  loginUser,
   resendOtp,
   verifyEmail,
   verifyEmailLink,
@@ -18,7 +17,7 @@ const {
   logoutUser,
   verifyResetCode,
   getMe,
-  updatePasswordWithOTPRequest,
+  loginUser,
 } = require("../controllers/authController");
 
 // Auth routes
@@ -29,7 +28,6 @@ router.get("/verify-email-link", verifyEmailLink);
 router.post("/login", loginUser);
 
 router.post("/forgot-password", forgotPassword);
-router.post("/request-password-update", protect, updatePasswordWithOTPRequest);
 router.post("/reset-password", resetPassword);
 router.post("/verify-reset-code", verifyResetCode);
 
