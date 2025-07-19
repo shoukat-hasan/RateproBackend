@@ -42,7 +42,7 @@ app.set("trust proxy", 1);
 const allowedOrigins = [
   "http://localhost:5173",
   "http://localhost:5174",
-  "https://rate-pro-admin.vercel.app",
+  "https://rate-pro-admin.vercel.app/",
   "https://ratepro-public.vercel.app"
 ];
 
