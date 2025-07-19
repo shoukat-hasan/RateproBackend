@@ -455,30 +455,3 @@ exports.getMe = async (req, res, next) => {
         res.status(500).json({ message: "Server error" });
     }
 };
-
-exports.updatePasswordWithOTPRequest = async (req, res, next) => {
-    try {
-        const { currentPassword, newPassword } = req.body;
-        const user = await User.findById(req.user._id);
-
-        const isMatch = await bcrypt.compare(currentPassword, user.password);
-        if (!isMatch) return res.status(400).json({ message: "Current password is incorrect" });
-
-        const code = generateOTP();
-        const expiresAt = moment().add(10, "minutes").toDate();
-
-        await OTP.create({ email: user.email, code, expiresAt, purpose: "reset" });
-
-        await sendEmail({
-            to: user.email,
-            subject: "Confirm Password Change",
-            html: `<p>Your OTP code is: <b>${code}</b></p>`
-        });
-
-        // Store newPassword temporarily in session/cache/db if needed
-        res.status(200).json({ message: "OTP sent to your email" });
-
-    } catch (err) {
-        next(err);
-    }
-};
