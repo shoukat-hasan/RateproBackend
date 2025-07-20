@@ -64,7 +64,7 @@ exports.updateUser = async (req, res, next) => {
 // === DELETE USER (soft delete) ===
 exports.deleteUser = async (req, res, next) => {
   try {
-    await User.findByIdAndUpdate(req.params.id, { deleted: true });
+    await User.findByIdAndUpdate(req.params.id);
     res.status(200).json({ message: "User deleted" });
   } catch (err) {
     next(err);
