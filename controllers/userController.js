@@ -133,15 +133,52 @@ exports.getUserById = async (req, res, next) => {
 };
 
 // === EXPORT USER DATA IN PDF ===
+// exports.exportUserDataPDF = async (req, res, next) => {
+//   try {
+//     const user = await User.findById(req.params.id);
+//     if (!user) return res.status(404).json({ message: "User not found" });
+
+//     const doc = new PDFDocument();
+//     const filePath = `./uploads/user-${user._id}.pdf`;
+//     const stream = fs.createWriteStream(filePath);
+//     doc.pipe(stream);
+
+//     doc.fontSize(20).text("User Data Report", { align: "center" });
+//     doc.moveDown();
+//     doc.text(`Name: ${user.name}`);
+//     doc.text(`Email: ${user.email}`);
+//     doc.text(`Role: ${user.role}`);
+//     doc.text(`Active: ${user.isActive}`);
+//     doc.text(`Verified: ${user.isVerified}`);
+//     doc.moveDown();
+//     doc.fontSize(16).text("Survey Stats:");
+//     doc.text(`Total Surveys Taken: ${user.surveyStats.totalSurveysTaken}`);
+//     doc.text(`Total Responses: ${user.surveyStats.totalResponses}`);
+//     doc.text(`Average Score: ${user.surveyStats.averageScore}`);
+
+//     doc.end();
+
+//     stream.on("finish", () => {
+//       res.download(filePath, `user-${user._id}.pdf`, () => {
+//         fs.unlinkSync(filePath);
+//       });
+//     });
+//   } catch (err) {
+//     next(err);
+//   }
+// };
+
 exports.exportUserDataPDF = async (req, res, next) => {
   try {
     const user = await User.findById(req.params.id);
     if (!user) return res.status(404).json({ message: "User not found" });
 
     const doc = new PDFDocument();
-    const filePath = `./uploads/user-${user._id}.pdf`;
-    const stream = fs.createWriteStream(filePath);
-    doc.pipe(stream);
+
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename="user-${user._id}.pdf"`);
+
+    doc.pipe(res);
 
     doc.fontSize(20).text("User Data Report", { align: "center" });
     doc.moveDown();
@@ -157,16 +194,11 @@ exports.exportUserDataPDF = async (req, res, next) => {
     doc.text(`Average Score: ${user.surveyStats.averageScore}`);
 
     doc.end();
-
-    stream.on("finish", () => {
-      res.download(filePath, `user-${user._id}.pdf`, () => {
-        fs.unlinkSync(filePath);
-      });
-    });
   } catch (err) {
     next(err);
   }
 };
+
 
 // === SEND NOTIFICATION EMAIL TO USER ===
 exports.sendNotification = async (req, res, next) => {
