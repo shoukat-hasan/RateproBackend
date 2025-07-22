@@ -1,72 +1,76 @@
 const User = require("../models/User");
+const OTP = require("../models/OTP");
 const sendEmail = require("../utils/sendEmail");
 const cloudinary = require("../utils/cloudinary");
 const PDFDocument = require("pdfkit");
 const fs = require("fs");
 const path = require("path");
 const bcrypt = require("bcryptjs");
+const moment = require("moment");
+const getBaseURL = require("../utils/getBaseURL");
+
+// === Helper: Generate OTP Code ===
+const generateOTP = () => Math.floor(100000 + Math.random() * 900000).toString();
 
 // === CREATE USER ===
-// exports.createUser = async (req, res, next) => {
-//   try {
-//     const { name, email, password, role } = req.body;
-
-//     const userExists = await User.findOne({ email });
-//     if (userExists) return res.status(400).json({ message: "User already exists" });
-
-//     const hashedPassword = await bcrypt.hash(password, 12);
-
-//     const activeFlag = isActive === true || isActive === "true";
-
-//     const user = await User.create({
-//       name,
-//       email,
-//       password: hashedPassword,
-//       role,
-//       createdBy: req.user._id,
-//       company: req.user.role === "company" ? req.user._id : undefined,
-//     });
-
-//     res.status(201).json({ message: "User created", user });
-//   } catch (err) {
-//     next(err);
-//   }
-// };
-
 exports.createUser = async (req, res, next) => {
   try {
-    // 1. Destructure isActive from req.body
     const { name, email, password, role, isActive } = req.body;
 
+    // Check if email already exists
     const userExists = await User.findOne({ email });
     if (userExists) {
       return res.status(400).json({ message: "User already exists" });
     }
 
+    // Hash password
     const hashedPassword = await bcrypt.hash(password, 12);
 
-    // Remove the problematic activeFlag line, as isActive is now directly from req.body
-    // const activeFlag = isActive === true || isActive === "true";
-
+    // Create new user
     const user = await User.create({
       name,
       email,
       password: hashedPassword,
       role,
-      // 2. Pass isActive to the create method
-      // Mongoose will automatically handle the boolean value.
-      // If isActive is undefined from req.body, the schema default (false) will apply.
-      // If isActive is explicitly false from req.body, it will be set to false.
-      // If isActive is explicitly true from req.body, it will be set to true.
-      isActive: isActive,
-      createdBy: req.user._id, // Assuming req.user is populated by authentication middleware
+      isActive, // boolean already handled from frontend
+      createdBy: req.user._id,
       company: req.user.role === "company" ? req.user._id : undefined,
     });
 
-    res.status(201).json({ message: "User created", user });
+    // 🔐 Generate OTP for email verification
+    const otpCode = generateOTP();
+    const expiresAt = moment().add(process.env.OTP_EXPIRE_MINUTES, "minutes").toDate();
+
+    await OTP.create({ email, code: otpCode, expiresAt, purpose: "verify" });
+
+    // 🌐 Determine the baseURL from the request origin
+    const origin = req.headers.origin || "";
+    let source = "public";
+    if (origin.includes("admin") && (role === "admin" || role === "company")) {
+      source = "admin";
+    }
+
+    const urls = getBaseURL();
+    const baseURL = source === "admin" ? urls.admin : urls.public;
+
+    const link = `${baseURL}/verify-email?code=${otpCode}&email=${email}`;
+
+    // 📧 Send verification email
+    await sendEmail({
+      to: email,
+      subject: "Verify Your Email",
+      html: `
+        <p>Hello ${name || "user"},</p>
+        <p>Please verify your email address by clicking the link below:</p>
+        <p><a href="${link}">${link}</a></p>
+        <p>This link/code will expire in ${process.env.OTP_EXPIRE_MINUTES} minute(s).</p>
+      `,
+    });
+
+    res.status(201).json({ message: "User created. Verification link sent to email.", user });
   } catch (err) {
-    console.error("Error creating user:", err); // Log the error for debugging
-    next(err); // Pass the error to your error handling middleware
+    console.error("Error creating user:", err);
+    next(err);
   }
 };
 
