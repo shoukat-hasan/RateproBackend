@@ -291,6 +291,7 @@ exports.loginUser = async (req, res, next) => {
                 email: user.email,
                 role: user.role,
                 avatar: user.avatar,
+                isActive: user.isActive,
                 isEmailVerified: user.isVerified,
                 lastLogin: user.lastLogin,
                 createdAt: user.createdAt
