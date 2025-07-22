@@ -4,6 +4,7 @@ const cloudinary = require("../utils/cloudinary");
 const PDFDocument = require("pdfkit");
 const fs = require("fs");
 const path = require("path");
+const bcrypt = require("bcryptjs");
 
 // === CREATE USER ===
 exports.createUser = async (req, res, next) => {
