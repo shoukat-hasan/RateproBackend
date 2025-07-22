@@ -7,27 +7,66 @@ const path = require("path");
 const bcrypt = require("bcryptjs");
 
 // === CREATE USER ===
+// exports.createUser = async (req, res, next) => {
+//   try {
+//     const { name, email, password, role } = req.body;
+
+//     const userExists = await User.findOne({ email });
+//     if (userExists) return res.status(400).json({ message: "User already exists" });
+
+//     const hashedPassword = await bcrypt.hash(password, 12);
+
+//     const activeFlag = isActive === true || isActive === "true";
+
+//     const user = await User.create({
+//       name,
+//       email,
+//       password: hashedPassword,
+//       role,
+//       createdBy: req.user._id,
+//       company: req.user.role === "company" ? req.user._id : undefined,
+//     });
+
+//     res.status(201).json({ message: "User created", user });
+//   } catch (err) {
+//     next(err);
+//   }
+// };
+
 exports.createUser = async (req, res, next) => {
   try {
-    const { name, email, password, role } = req.body;
+    // 1. Destructure isActive from req.body
+    const { name, email, password, role, isActive } = req.body;
 
     const userExists = await User.findOne({ email });
-    if (userExists) return res.status(400).json({ message: "User already exists" });
+    if (userExists) {
+      return res.status(400).json({ message: "User already exists" });
+    }
 
     const hashedPassword = await bcrypt.hash(password, 12);
+
+    // Remove the problematic activeFlag line, as isActive is now directly from req.body
+    // const activeFlag = isActive === true || isActive === "true";
 
     const user = await User.create({
       name,
       email,
       password: hashedPassword,
       role,
-      createdBy: req.user._id,
+      // 2. Pass isActive to the create method
+      // Mongoose will automatically handle the boolean value.
+      // If isActive is undefined from req.body, the schema default (false) will apply.
+      // If isActive is explicitly false from req.body, it will be set to false.
+      // If isActive is explicitly true from req.body, it will be set to true.
+      isActive: isActive,
+      createdBy: req.user._id, // Assuming req.user is populated by authentication middleware
       company: req.user.role === "company" ? req.user._id : undefined,
     });
 
     res.status(201).json({ message: "User created", user });
   } catch (err) {
-    next(err);
+    console.error("Error creating user:", err); // Log the error for debugging
+    next(err); // Pass the error to your error handling middleware
   }
 };
 
