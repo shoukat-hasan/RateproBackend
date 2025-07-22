@@ -55,7 +55,7 @@ router.use(protect, allowRoles("admin", "company"));
 router.post("/", createUser);
 router.get("/", getAllUsers);
 router.get("/:id", getUserById);
-// router.put("/:id", upload.single("avatar"), updateUser);
+router.put("/:id", upload.single("avatar"), updateUser);
 router.put("/:id", updateUser);
 router.delete("/:id", deleteUser);
 router.put("/toggle/:id", toggleActive);
