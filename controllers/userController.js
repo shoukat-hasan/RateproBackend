@@ -87,27 +87,68 @@ exports.toggleActive = async (req, res, next) => {
 };
 
 // === GET ALL USERS (Search, Pagination, Filter) ===
+// exports.getAllUsers = async (req, res, next) => {
+//   try {
+//     const {
+//       page = 1,
+//       limit = 10,
+//       search = "",
+//       sort = "createdAt",
+//       role,
+//       active,
+//     } = req.query;
+
+//     const query = {
+//       deleted: false,
+//       name: { $regex: search, $options: "i" },
+//     };
+
+//     if (role) query.role = role;
+//     if (active !== undefined) query.isActive = active === "true";
+
+//     // If company role — restrict to own users
+//     if (req.user.role === "company") query.company = req.user._id;
+
+//     const total = await User.countDocuments(query);
+//     const users = await User.find(query)
+//       .sort({ [sort]: -1 })
+//       .skip((page - 1) * limit)
+//       .limit(parseInt(limit));
+
+//     res.status(200).json({ total, page, users });
+//   } catch (err) {
+//     next(err);
+//   }
+// };
 exports.getAllUsers = async (req, res, next) => {
   try {
     const {
       page = 1,
       limit = 10,
-      search = "",
+      search,
       sort = "createdAt",
       role,
       active,
     } = req.query;
 
-    const query = {
-      deleted: false,
-      name: { $regex: search, $options: "i" },
-    };
+    const query = { deleted: false };
 
+    // 👇 Add search only if present
+    if (search) {
+      query.name = { $regex: search, $options: "i" };
+    }
+
+    // 👇 Filter by role if passed
     if (role) query.role = role;
-    if (active !== undefined) query.isActive = active === "true";
 
-    // If company role — restrict to own users
-    if (req.user.role === "company") query.company = req.user._id;
+    // 👇 Filter by active status only if defined
+    if (active === "true") query.isActive = true;
+    else if (active === "false") query.isActive = false;
+
+    // 👇 Restrict company users
+    if (req.user.role === "company") {
+      query.company = req.user._id;
+    }
 
     const total = await User.countDocuments(query);
     const users = await User.find(query)
@@ -115,8 +156,9 @@ exports.getAllUsers = async (req, res, next) => {
       .skip((page - 1) * limit)
       .limit(parseInt(limit));
 
-    res.status(200).json({ total, page, users });
+    res.status(200).json({ total, page: parseInt(page), users });
   } catch (err) {
+    console.error("Get All Users Error:", err);
     next(err);
   }
 };
