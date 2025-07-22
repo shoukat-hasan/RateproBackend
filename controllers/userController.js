@@ -75,15 +75,48 @@ exports.createUser = async (req, res, next) => {
 };
 
 // === UPDATE USER ===
+// exports.updateUser = async (req, res, next) => {
+//   try {
+//     const { name, role } = req.body;
+//     const user = await User.findById(req.params.id);
+//     if (!user) return res.status(404).json({ message: "User not found" });
+
+//     if (req.file) {
+//       if (user.avatar?.public_id)
+//         await cloudinary.uploader.destroy(user.avatar.public_id);
+
+//       const uploaded = await cloudinary.uploader.upload(req.file.path, {
+//         folder: "avatars",
+//       });
+
+//       user.avatar = {
+//         public_id: uploaded.public_id,
+//         url: uploaded.secure_url,
+//       };
+//     }
+
+//     if (name) user.name = name;
+//     if (role) user.role = role;
+
+//     await user.save();
+//     res.status(200).json({ message: "User updated", user });
+//   } catch (err) {
+//     next(err);
+//   }
+// };
+
 exports.updateUser = async (req, res, next) => {
   try {
-    const { name, role } = req.body;
+    const { name, role, isActive } = req.body; // ✅ include isActive
+
     const user = await User.findById(req.params.id);
     if (!user) return res.status(404).json({ message: "User not found" });
 
+    // ✅ Handle avatar upload
     if (req.file) {
-      if (user.avatar?.public_id)
+      if (user.avatar?.public_id) {
         await cloudinary.uploader.destroy(user.avatar.public_id);
+      }
 
       const uploaded = await cloudinary.uploader.upload(req.file.path, {
         folder: "avatars",
@@ -95,8 +128,14 @@ exports.updateUser = async (req, res, next) => {
       };
     }
 
+    // ✅ Assign fields
     if (name) user.name = name;
     if (role) user.role = role;
+
+    // ✅ Handle isActive update only if it’s boolean (to avoid undefined overwriting)
+    if (typeof isActive === "boolean") {
+      user.isActive = isActive;
+    }
 
     await user.save();
     res.status(200).json({ message: "User updated", user });
@@ -104,6 +143,7 @@ exports.updateUser = async (req, res, next) => {
     next(err);
   }
 };
+
 
 // === DELETE USER (soft delete) ===
 // exports.deleteUser = async (req, res, next) => {
