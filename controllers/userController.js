@@ -75,45 +75,91 @@ exports.createUser = async (req, res, next) => {
 };
 
 // === UPDATE USER ===
-exports.updateUser = async (req, res, next) => {
-  try {
-    const { name, role, isActive } = req.body; // ✅ include isActive
+// exports.updateUser = async (req, res, next) => {
+//   try {
+//     const { name, role, isActive } = req.body; // ✅ include isActive
 
-    const user = await User.findById(req.params.id);
+//     const user = await User.findById(req.params.id);
+//     if (!user) return res.status(404).json({ message: "User not found" });
+
+//     // ✅ Handle avatar upload
+//     if (req.file) {
+//       if (user.avatar?.public_id) {
+//         await cloudinary.uploader.destroy(user.avatar.public_id);
+//       }
+
+//       const uploaded = await cloudinary.uploader.upload(req.file.path, {
+//         folder: "avatars",
+//       });
+
+//       user.avatar = {
+//         public_id: uploaded.public_id,
+//         url: uploaded.secure_url,
+//       };
+//     }
+
+//     // ✅ Assign fields
+//     if (name) user.name = name;
+//     if (role) user.role = role;
+
+//     // ✅ Handle isActive update only if it’s boolean (to avoid undefined overwriting)
+//     if (typeof isActive === "boolean") {
+//       user.isActive = isActive;
+//     }
+
+//     await user.save();
+//     res.status(200).json({ message: "User updated", user });
+//   } catch (err) {
+//     next(err);
+//   }
+// };
+
+exports.updateUser = async (req, res) => {
+  try {
+    const userId = req.params.id;
+    const updates = req.body;
+
+    // Find user
+    const user = await User.findById(userId);
     if (!user) return res.status(404).json({ message: "User not found" });
 
     // ✅ Handle avatar upload
     if (req.file) {
-      if (user.avatar?.public_id) {
+      // Upload new image to Cloudinary
+      const uploadResult = await cloudinary.uploader.upload(req.file.path, {
+        folder: "avatars",
+        width: 300,
+        crop: "scale",
+      });
+
+      // Delete temp file from uploads/
+      fs.unlinkSync(req.file.path);
+
+      // ✅ Optional: Delete previous avatar from Cloudinary
+      if (user.avatar && user.avatar.public_id) {
         await cloudinary.uploader.destroy(user.avatar.public_id);
       }
 
-      const uploaded = await cloudinary.uploader.upload(req.file.path, {
-        folder: "avatars",
-      });
-
-      user.avatar = {
-        public_id: uploaded.public_id,
-        url: uploaded.secure_url,
+      // Update avatar field
+      updates.avatar = {
+        public_id: uploadResult.public_id,
+        url: uploadResult.secure_url,
       };
     }
 
-    // ✅ Assign fields
-    if (name) user.name = name;
-    if (role) user.role = role;
-
-    // ✅ Handle isActive update only if it’s boolean (to avoid undefined overwriting)
-    if (typeof isActive === "boolean") {
-      user.isActive = isActive;
-    }
-
+    // ✅ Update other fields
+    Object.assign(user, updates);
     await user.save();
-    res.status(200).json({ message: "User updated", user });
+
+    res.status(200).json({
+      message: "User updated successfully",
+      user,
+    });
   } catch (err) {
-    next(err);
+    console.error("Update Error:", err);
+    res.status(500).json({ message: "Something went wrong while updating user" });
   }
 };
-
 
 // === DELETE USER (soft delete) ===
 // exports.deleteUser = async (req, res, next) => {
