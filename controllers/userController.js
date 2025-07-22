@@ -104,12 +104,21 @@ exports.updateUser = async (req, res, next) => {
 // === DELETE USER (soft delete) ===
 // exports.deleteUser = async (req, res, next) => {
 //   try {
-//     await User.findByIdAndUpdate(req.params.id);
-//     res.status(200).json({ message: "User deleted" });
+//     const updatedUser = await User.findByIdAndUpdate(
+//       req.params.id,
+//       { deleted: true }, // or { isDeleted: true }
+//       { new: true }
+//     );
+//     if (!updatedUser) {
+//       return res.status(404).json({ message: "User not found" });
+//     }
+//     res.status(200).json({ message: "User deactivated successfully" });
 //   } catch (err) {
 //     next(err);
 //   }
 // };
+
+// === DELETE USER (Hard delete) ===
 exports.deleteUser = async (req, res, next) => {
   try {
     const deletedUser = await User.findByIdAndDelete(req.params.id);
