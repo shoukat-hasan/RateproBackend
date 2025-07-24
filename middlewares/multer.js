@@ -26,3 +26,22 @@ const fileFilter = (req, file, cb) => {
 const upload = multer({ storage, fileFilter });
 
 module.exports = upload;
+
+// const multer = require("multer");
+
+// // Store in memory instead of disk
+// const storage = multer.memoryStorage();
+
+// // File filter
+// const fileFilter = (req, file, cb) => {
+//   const allowed = /jpeg|jpg|png|webp/;
+//   const ext = allowed.test(file.originalname.toLowerCase());
+//   const mime = allowed.test(file.mimetype);
+
+//   if (ext && mime) return cb(null, true);
+//   cb(new Error("Only images allowed (jpeg, jpg, png, webp)"));
+// };
+
+// const upload = multer({ storage, fileFilter });
+
+// module.exports = upload;
