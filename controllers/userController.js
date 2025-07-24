@@ -114,89 +114,42 @@ exports.createUser = async (req, res, next) => {
 //   }
 // };
 
-// exports.updateUser = async (req, res) => {
-//   console.log("REQ FILE:", req.file);
-//   try {
-//     const userId = req.params.id;
-//     const updates = req.body;
-
-//     // Find user
-//     const user = await User.findById(userId);
-//     if (!user) return res.status(404).json({ message: "User not found" });
-
-//     // ✅ Handle avatar upload
-//     if (req.file) {
-//       // Upload new image to Cloudinary
-//       const uploadResult = await cloudinary.uploader.upload(req.file.path, {
-//         folder: "avatars",
-//         width: 300,
-//         crop: "scale",
-//       });
-
-//       // Delete temp file from uploads/
-//       fs.unlinkSync(req.file.path);
-
-//       // ✅ Optional: Delete previous avatar from Cloudinary
-//       if (user.avatar && user.avatar.public_id) {
-//         await cloudinary.uploader.destroy(user.avatar.public_id);
-//       }
-
-//       // Update avatar field
-//       updates.avatar = {
-//         public_id: uploadResult.public_id,
-//         url: uploadResult.secure_url,
-//       };
-//     }
-
-//     // ✅ Update other fields
-//     Object.assign(user, updates);
-//     await user.save();
-
-//     res.status(200).json({
-//       message: "User updated successfully",
-//       user,
-//     });
-//   } catch (err) {
-//     console.error("Update Error:", err);
-//     res.status(500).json({ message: "Something went wrong while updating user" });
-//   }
-// };
-
 exports.updateUser = async (req, res) => {
+  console.log("REQ FILE:", req.file);
   try {
     const userId = req.params.id;
     const updates = req.body;
 
-    console.log("REQ FILE:", req.file); // 🔍 Debug multer
+    // Find user
     const user = await User.findById(userId);
     if (!user) return res.status(404).json({ message: "User not found" });
 
+    // ✅ Handle avatar upload
     if (req.file) {
+      // Upload new image to Cloudinary
       const uploadResult = await cloudinary.uploader.upload(req.file.path, {
         folder: "avatars",
         width: 300,
         crop: "scale",
       });
 
+      // Delete temp file from uploads/
       fs.unlinkSync(req.file.path);
 
+      // ✅ Optional: Delete previous avatar from Cloudinary
       if (user.avatar && user.avatar.public_id) {
         await cloudinary.uploader.destroy(user.avatar.public_id);
       }
 
+      // Update avatar field
       updates.avatar = {
         public_id: uploadResult.public_id,
         url: uploadResult.secure_url,
       };
-
-      console.log("Updated Avatar:", updates.avatar); // 🔍 Debug avatar
     }
 
-    // Safer object update
-    Object.entries(updates).forEach(([key, value]) => {
-      user[key] = value;
-    });
-
+    // ✅ Update other fields
+    Object.assign(user, updates);
     await user.save();
 
     res.status(200).json({
@@ -208,6 +161,7 @@ exports.updateUser = async (req, res) => {
     res.status(500).json({ message: "Something went wrong while updating user" });
   }
 };
+
 
 // === DELETE USER (soft delete) ===
 // exports.deleteUser = async (req, res, next) => {
