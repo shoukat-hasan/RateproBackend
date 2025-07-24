@@ -75,8 +75,7 @@ app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 // All modular routes will be imported & registered here later
 app.use("/api/auth", require("./routes/authRoutes"));
 app.use("/api/users", require("./routes/userRoutes"));
-
-// app.use("/api/surveys", require("./routes/surveyRoutes"));
+app.use("/api/surveys", require("./routes/surveyRoutes"));
 // app.use("/api/content", require("./routes/contentRoutes"));
 
 // === Error Handling Middleware ===
