@@ -1,5 +1,4 @@
-// models/User.js
-
+// // models/User.js
 const mongoose = require("mongoose");
 
 const userSchema = new mongoose.Schema(
@@ -24,29 +23,72 @@ const userSchema = new mongoose.Schema(
       public_id: { type: String },
       url: { type: String },
     },
+
     role: {
       type: String,
-      enum: ["admin", "company", "user"],
-      default: "user",
+      enum: ["admin", "companyAdmin", "member", "user"],
+      default: "user", // default for public user
     },
+
     isVerified: {
       type: Boolean,
       default: false,
     },
     isActive: {
       type: Boolean,
-      default: false,
+      default: true,
     },
+
+    // Auth Tokens
     resetPasswordToken: String,
     resetPasswordExpire: Date,
     emailVerificationToken: String,
     emailTokenExpire: Date,
 
-    // Audit Info
-    createdBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
-    company: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+    // If role === "member", linked to a company
+    company: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      required: function () {
+        return this.role === "member";
+      },  
+    },
 
-    // For dashboard stats
+    designation: {
+      type: String,
+      default: "Team Member",
+      required: function () {
+        return this.role === "member";
+      },
+    },
+
+    // Who created this user (system admin or company super admin)
+    createdBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
+
+    // Company Profile — only used if role === "companyAdmin"
+    companyProfile: {
+      name: { type: String },
+      website: { type: String },
+      address: { type: String },
+      totalEmployees: { type: Number },
+      departments: [
+        {
+          name: { type: String, required: true },
+          head: { type: String }, // Can be converted to user ref later
+        },
+      ],
+    },
+
+    department: {
+      type: String, // or ObjectId ref to a "Department" model later if needed
+      default: null,
+    },    
+
+    // Dashboard Stats — for survey activity or future analytics
     surveyStats: {
       totalSurveysTaken: { type: Number, default: 0 },
       totalResponses: { type: Number, default: 0 },
@@ -56,7 +98,7 @@ const userSchema = new mongoose.Schema(
     deleted: {
       type: Boolean,
       default: false,
-    }
+    },
   },
   { timestamps: true }
 );

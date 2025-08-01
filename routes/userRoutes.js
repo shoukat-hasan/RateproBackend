@@ -50,7 +50,7 @@ const {
 router.put("/me", protect, upload.single("avatar"), updateMe);
 
 // ✅ Protected Admin + Company routes
-router.use(protect, allowRoles("admin", "company"));
+router.use(protect, allowRoles("admin", "companyAdmin"));
 
 router.post("/", createUser);
 router.get("/", getAllUsers);
