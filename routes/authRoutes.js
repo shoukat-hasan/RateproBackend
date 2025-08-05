@@ -18,6 +18,8 @@ const {
   verifyResetCode,
   getMe,
   loginUser,
+  verifyLoginOTP,
+  refreshAccessToken,
 } = require("../controllers/authController");
 
 // Auth routes
@@ -26,6 +28,8 @@ router.post("/resend-otp", resendOtp);
 router.post("/verify-email", verifyEmail);
 router.get("/verify-email-link", verifyEmailLink);
 router.post("/login", loginUser);
+router.post("/verify-login-otp", verifyLoginOTP);
+router.get("/refresh-token", refreshAccessToken);
 
 router.post("/forgot-password", forgotPassword);
 router.post("/reset-password", resetPassword);
@@ -34,6 +38,8 @@ router.post("/verify-reset-code", verifyResetCode);
 router.put("/update-profile", protect, upload.single("avatar"), updateProfile);
 router.post("/logout", logoutUser);
 router.get("/me", protect, getMe);
+
+
 
 
 module.exports = router;

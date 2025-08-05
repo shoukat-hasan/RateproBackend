@@ -47,6 +47,12 @@ const allowedOrigins = [
   "https://ratepro-public.vercel.app"
 ];
 
+// === Body & Cookie Parsers ===
+app.use(express.json({ limit: "10mb" }));
+app.use(express.urlencoded({ extended: true, limit: "10mb" }));
+app.use(cookieParser());
+app.use(globalLimiter); // Applies to entire app
+
 app.use(
   cors({
     origin: function (origin, callback) {
@@ -61,11 +67,10 @@ app.use(
   })
 );
 
-// === Body & Cookie Parsers ===
-app.use(express.json({ limit: "10mb" }));
-app.use(express.urlencoded({ extended: true, limit: "10mb" }));
-app.use(cookieParser());
-app.use(globalLimiter); // Applies to entire app
+// app.get("/api/debug-cookies", (req, res) => {
+//   console.log("🍪 Cookies from browser:", req.cookies);
+//   res.json({ cookies: req.cookies });
+// });
 
 
 // === Static Folder for Assets (profile imgs, PDFs, QR etc.) ===

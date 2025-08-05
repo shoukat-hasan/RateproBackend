@@ -473,12 +473,11 @@ exports.getAllUsers = async (req, res, next) => {
 
     const query = { deleted: false };
 
-    // 🔍 Search by name, email or designation (optional)
+    // 🔍 Search by name, email (optional)
     if (search) {
       query.$or = [
         { name: { $regex: search, $options: "i" } },
         { email: { $regex: search, $options: "i" } },
-        { designation: { $regex: search, $options: "i" } },
       ];
     }
 
@@ -616,6 +615,42 @@ exports.sendNotification = async (req, res, next) => {
 };
 
 // controllers/userController.js
+// exports.updateMe = async (req, res, next) => {
+//   try {
+//     const updates = [
+//       "name",
+//       "email",
+//       "phone",
+//       "department",
+//       "bio",
+//       "timezone",
+//       "language"
+//     ];
+
+//     const user = await User.findById(req.user._id);
+//     if (!user) return res.status(404).json({ message: "User not found" });
+
+//     updates.forEach(field => {
+//       if (req.body[field] !== undefined) {
+//         user[field] = req.body[field];
+//       }
+//     });
+
+//     if (req.body.companyProfile && user.role === "companyAdmin") {
+//       user.companyProfile = {
+//         ...user.companyProfile, // optional: preserve existing
+//         ...req.body.companyProfile,
+//         totalEmployees: parseInt(req.body.companyProfile.totalEmployees || 0),
+//         departments: req.body.companyProfile.departments || [],
+//       };
+//     }
+
+//     await user.save();
+//     res.status(200).json({ message: "Profile updated", user });
+//   } catch (err) {
+//     next(err);
+//   }
+// };
 exports.updateMe = async (req, res, next) => {
   try {
     const updates = [
@@ -624,21 +659,38 @@ exports.updateMe = async (req, res, next) => {
       "phone",
       "department",
       "bio",
-      "timezone",
-      "language"
     ];
 
     const user = await User.findById(req.user._id);
     if (!user) return res.status(404).json({ message: "User not found" });
 
-    updates.forEach(field => {
+    // Regular fields update
+    updates.forEach((field) => {
       if (req.body[field] !== undefined) {
         user[field] = req.body[field];
       }
     });
 
+    // Company profile update (only if user is company)
+    if (req.body.companyProfile && user.role === "companyAdmin") {
+      const company = req.body.companyProfile;
+
+      user.companyProfile = {
+        ...user.companyProfile, // Preserve existing values
+        name: company.name ?? user.companyProfile?.name ?? "",
+        address: company.address ?? user.companyProfile?.address ?? "",
+        contactEmail: company.contactEmail ?? user.companyProfile?.contactEmail ?? "",
+        contactPhone: company.contactPhone ?? user.companyProfile?.contactPhone ?? "",
+        website: company.website ?? user.companyProfile?.website ?? "",
+        totalEmployees: parseInt(company.totalEmployees ?? user.companyProfile?.totalEmployees ?? 0),
+        departments: Array.isArray(company.departments)
+          ? company.departments
+          : user.companyProfile?.departments ?? [],
+      };
+    }
+
     await user.save();
-    res.status(200).json({ message: "Profile updated", user });
+    res.status(200).json({ message: "Profile updated successfully", user });
   } catch (err) {
     next(err);
   }
