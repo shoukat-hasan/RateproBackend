@@ -57,14 +57,12 @@ const generateOTP = () => Math.floor(100000 + Math.random() * 900000).toString()
 exports.registerUser = async (req, res, next) => {
     try {
         const { name, email, password, role } = req.body;
-        console.log("Received Role:", role);
 
         const userExists = await User.findOne({ email });
         if (userExists) return res.status(400).json({ message: "Email already registered" });
 
         const hashedPassword = await bcrypt.hash(password, 12);
         const user = await User.create({ name, email, password: hashedPassword, role });
-        console.log("Saved User:", user);
 
         const otpCode = generateOTP();
         const expiresAt = moment().add(process.env.OTP_EXPIRE_MINUTES, 'minutes').toDate();
@@ -134,7 +132,7 @@ exports.verifyEmailLink = async (req, res, next) => {
 exports.verifyEmail = async (req, res, next) => {
     try {
         const { email, code } = req.body;
-        console.log("BODY:", req.body);
+
         if (!email || !code) return res.status(400).json({ message: "Missing code or email" });
 
         // const otp = await OTP.findOne({ email, code, purpose: "verify" });
@@ -479,9 +477,7 @@ exports.forgotPassword = async (req, res, next) => {
         const expiresAt = moment().add(process.env.OTP_EXPIRE_MINUTES, 'minutes').toDate();
 
         await OTP.deleteMany({ email, purpose: "reset" });
-        console.log("Saving OTP to DB...");
         const savedOTP = await OTP.create({ email, code: otpCode, expiresAt, purpose: "reset" });
-        console.log("Saved OTP:", savedOTP);
 
         await sendEmail({
             to: email,
@@ -518,7 +514,7 @@ exports.forgotPassword = async (req, res, next) => {
 // };
 
 exports.resetPassword = async (req, res, next) => {
-    console.log("🔥 Reset password route hit");
+
     try {
         const { email, code, newPassword } = req.body;
 

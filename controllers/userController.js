@@ -83,9 +83,6 @@ exports.createUser = async (req, res, next) => {
       return res.status(400).json({ message: "Name, email, and password are required" });
     }
 
-    console.log("Logged in user role:", req.user.role);
-
-
     // Prevent unauthorized role assignment
     // 🔒 Role assignment logic
     let allowedRoles = [];
@@ -125,8 +122,6 @@ exports.createUser = async (req, res, next) => {
     const baseURL = req.user.role === "admin" || req.user.role === "companyAdmin" || req.user.role === "member"
       ? getBaseURL().admin
       : getBaseURL().public;
-
-      console.log(baseURL)
 
     // Send verification email
     await sendEmail({
@@ -196,7 +191,6 @@ exports.createUser = async (req, res, next) => {
 // };
 
 exports.updateUser = async (req, res) => {
-  console.log("REQ FILE:", req.file);
   try {
     const userId = req.params.id;
     const updates = req.body;
