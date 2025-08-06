@@ -91,7 +91,7 @@ exports.createUser = async (req, res, next) => {
     let allowedRoles = [];
 
     if (req.user.role === "admin") {
-      allowedRoles = ["companyAdmin", "member", "user"];
+      allowedRoles = ["companyAdmin", "user"];
     } else if (req.user.role === "companyAdmin") {
       allowedRoles = ["member"];
     } else if (req.user.role === "member") {
@@ -125,31 +125,17 @@ exports.createUser = async (req, res, next) => {
       company: role === "member" && req.user.role === "companyAdmin" ? req.user._id : undefined,
     });
 
-    // Generate and store OTP
-    const otpCode = generateOTP();
-    const expiresAt = moment().add(process.env.OTP_EXPIRE_MINUTES, "minutes").toDate();
-    await OTP.create({ email, code: otpCode, expiresAt, purpose: "verify" });
-
-    // Prepare verification link
-    const origin = req.headers.origin || "";
-    let source = "public";
-    if (origin.includes("admin") && (role === "admin" || role === "companyAdmin")) {
-      source = "admin";
-    }
-
-    const urls = getBaseURL();
-    const baseURL = source === "admin" ? urls.admin : urls.public;
-    const link = `${baseURL}/verify-email?code=${otpCode}&email=${email}`;
-
     // Send verification email
     await sendEmail({
       to: email,
-      subject: "Verify Your Email",
+      subject: "Your Account Has Been Created",
       html: `
         <p>Hello ${name},</p>
-        <p>Please verify your email by clicking the link below:</p>
-        <p><a href="${link}">${link}</a></p>
-        <p>This link/code will expire in ${process.env.OTP_EXPIRE_MINUTES} minute(s).</p>
+        <p>Your account has been successfully created.</p>
+        <p><strong>Login Email:</strong> ${email}</p>
+        <p><strong>Temporary Password:</strong> ${password}</p>
+        <p>You can now log in to your dashboard and complete the email verification process.</p>
+        <p>Regards,<br/>Team</p>
       `,
     });
 
