@@ -258,6 +258,63 @@ exports.updateUser = async (req, res) => {
 // };
 
 // === DELETE USER (Hard delete) ===
+// exports.deleteUser = async (req, res, next) => {
+//   try {
+//     const targetUser = await User.findById(req.params.id);
+//     if (!targetUser) {
+//       return res.status(404).json({ message: "User not found" });
+//     }
+
+//     const currentUser = req.user;
+
+//     // 🔐 If admin deleting a companyAdmin
+//     if (currentUser.role === "admin" && targetUser.role === "companyAdmin") {
+//       // 1. Find all members under this company
+//       const companyMembers = await User.find({ company: targetUser._id });
+
+//       // 2. Delete avatars of all members (if any)
+//       for (const member of companyMembers) {
+//         if (member.avatar?.public_id) {
+//           await cloudinary.uploader.destroy(member.avatar.public_id);
+//         }
+//       }
+
+//       // 3. Delete all members
+//       await User.deleteMany({ company: targetUser._id });
+
+//       // 4. Delete companyAdmin's avatar (if exists)
+//       if (targetUser.avatar?.public_id) {
+//         await cloudinary.uploader.destroy(targetUser.avatar.public_id);
+//       }
+
+//       // 5. Delete companyAdmin
+//       await User.findByIdAndDelete(targetUser._id);
+
+//       return res.status(200).json({ message: "Company and its members deleted successfully" });
+
+//     } else if (currentUser.role === "companyAdmin" && targetUser.role === "member") {
+//       if (targetUser.company?.toString() !== currentUser._id.toString()) {
+//         return res.status(403).json({ message: "You can only delete your own members" });
+//       }
+
+//       // Delete avatar if present
+//       if (targetUser.avatar?.public_id) {
+//         await cloudinary.uploader.destroy(targetUser.avatar.public_id);
+//       }
+
+//       await User.findByIdAndDelete(targetUser._id);
+//       return res.status(200).json({ message: "Member deleted successfully" });
+
+//     } else {
+//       return res.status(403).json({ message: "Not authorized to perform this action" });
+//     }
+
+//   } catch (err) {
+//     console.error("Delete Error:", err);
+//     next(err);
+//   }
+// };
+
 exports.deleteUser = async (req, res, next) => {
   try {
     const targetUser = await User.findById(req.params.id);
@@ -267,47 +324,63 @@ exports.deleteUser = async (req, res, next) => {
 
     const currentUser = req.user;
 
-    // 🔐 If admin deleting a companyAdmin
-    if (currentUser.role === "admin" && targetUser.role === "companyAdmin") {
-      // 1. Find all members under this company
-      const companyMembers = await User.find({ company: targetUser._id });
-
-      // 2. Delete avatars of all members (if any)
-      for (const member of companyMembers) {
-        if (member.avatar?.public_id) {
-          await cloudinary.uploader.destroy(member.avatar.public_id);
-        }
-      }
-
-      // 3. Delete all members
-      await User.deleteMany({ company: targetUser._id });
-
-      // 4. Delete companyAdmin's avatar (if exists)
+    // 🔐 Admin can delete anyone
+    if (currentUser.role === "admin") {
+      // Delete avatar if present
       if (targetUser.avatar?.public_id) {
         await cloudinary.uploader.destroy(targetUser.avatar.public_id);
       }
 
-      // 5. Delete companyAdmin
+      // If deleting a companyAdmin, delete its members first
+      if (targetUser.role === "companyAdmin") {
+        const companyMembers = await User.find({ company: targetUser._id });
+
+        for (const member of companyMembers) {
+          if (member.avatar?.public_id) {
+            await cloudinary.uploader.destroy(member.avatar.public_id);
+          }
+        }
+
+        await User.deleteMany({ company: targetUser._id });
+      }
+
       await User.findByIdAndDelete(targetUser._id);
+      return res.status(200).json({ message: "User deleted successfully" });
+    }
 
-      return res.status(200).json({ message: "Company and its members deleted successfully" });
-
-    } else if (currentUser.role === "companyAdmin" && targetUser.role === "member") {
+    // 🏢 Company Admin deleting their own member
+    if (currentUser.role === "companyAdmin" && targetUser.role === "member") {
       if (targetUser.company?.toString() !== currentUser._id.toString()) {
         return res.status(403).json({ message: "You can only delete your own members" });
       }
 
-      // Delete avatar if present
       if (targetUser.avatar?.public_id) {
         await cloudinary.uploader.destroy(targetUser.avatar.public_id);
       }
 
       await User.findByIdAndDelete(targetUser._id);
       return res.status(200).json({ message: "Member deleted successfully" });
-
-    } else {
-      return res.status(403).json({ message: "Not authorized to perform this action" });
     }
+
+    // 👥 Member trying to delete another member WITH permission
+    if (currentUser.role === "member" && targetUser.role === "member") {
+      if (
+        targetUser.company?.toString() === currentUser.company?.toString() &&
+        currentUser.canDeleteMembers // 👈 boolean permission field in DB
+      ) {
+        if (targetUser.avatar?.public_id) {
+          await cloudinary.uploader.destroy(targetUser.avatar.public_id);
+        }
+
+        await User.findByIdAndDelete(targetUser._id);
+        return res.status(200).json({ message: "Member deleted successfully" });
+      } else {
+        return res.status(403).json({ message: "Not authorized to delete this member" });
+      }
+    }
+
+    // ❌ Public user or any other invalid case
+    return res.status(403).json({ message: "Not authorized to perform this action" });
 
   } catch (err) {
     console.error("Delete Error:", err);
