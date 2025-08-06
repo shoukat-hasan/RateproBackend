@@ -309,7 +309,7 @@ exports.loginUser = async (req, res, next) => {
             .populate({
                 path: "company", // if role is 'member', populate the company reference
                 select: "companyProfile",
-            });
+            }).lean();
 
         if (!user)
             return res.status(404).json({ message: "User not found" });
@@ -372,8 +372,8 @@ exports.loginUser = async (req, res, next) => {
 
         if (user.role === "companyAdmin") {
             companyProfile = user.companyProfile || null;
-        } else if (user.role === "member" && user.company) {
-            companyProfile = user.company.companyProfile || null;
+        } else if (user.role === "member" && user.company && user.company.companyProfile) {
+            companyProfile = user.company.companyProfile;
         }
 
         // ✅ Final Response
