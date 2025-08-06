@@ -100,8 +100,6 @@ exports.createUser = async (req, res, next) => {
       }
     }
 
-    console.log("Allowed roles:", allowedRoles);
-
     if (!allowedRoles.includes(role)) {
       return res.status(403).json({ message: "You are not allowed to assign this role" });
     }
@@ -124,6 +122,11 @@ exports.createUser = async (req, res, next) => {
       createdBy: req.user._id,
       company: role === "member" && req.user.role === "companyAdmin" ? req.user._id : undefined,
     });
+    const baseURL = req.user.role === "admin" || req.user.role === "companyAdmin" || req.user.role === "member"
+      ? getBaseURL().admin
+      : getBaseURL().public;
+
+      console.log(baseURL)
 
     // Send verification email
     await sendEmail({
@@ -135,7 +138,7 @@ exports.createUser = async (req, res, next) => {
         <p><strong>Login Email:</strong> ${email}</p>
         <p><strong>Temporary Password:</strong> ${password}</p>
         <p>You can now log in to your dashboard and complete the email verification process.</p>
-        <p><a href="${getBaseURL(req)}/login" target="_blank">${getBaseURL(req)}/login</a></p>
+        <p><a href="${baseURL}/login" target="_blank">${baseURL}/login</a></p>
     <p>Once on the login page, please enter the email and temporary password provided above.</p>
     <br/>
         <p>Regards,<br/>Team</p>
