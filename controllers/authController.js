@@ -305,25 +305,23 @@ exports.loginUser = async (req, res, next) => {
     try {
         const { email, password, source = "public" } = req.body;
 
-        const user = await User.findOne({ email })
-            .populate({
-                path: "company", // if role is 'member', populate the company reference
-                select: "companyProfile",
-            }).lean();
-
-        console.log("🔥 User from DB:", user);
-
-        if (!user)
+        const user = await User.findOne({ email });
+        if (!user) {
             return res.status(404).json({ message: "User not found" });
+        }
 
         const isMatch = await bcrypt.compare(password, user.password);
-        if (!isMatch)
-            return res.status(401).json({ message: "Invalid password" });
+        if (!isMatch) {
+            return res.status(401).json({ message: "Invalid password" }); // 👈 yeh message important hai
+        }
 
         const isSystemAdmin = user.role === "admin" && user.email === "admin@ratepro.com";
+
+        // 🔐 Force OTP every time for companyAdmin/member
         const needsOTP = (user.role === "companyAdmin" || user.role === "member") && !isSystemAdmin;
 
         if (needsOTP) {
+            // Clean previous OTPs
             await OTP.deleteMany({ email, purpose: "login_verify" });
 
             const otpCode = generateOTP();
@@ -351,7 +349,7 @@ exports.loginUser = async (req, res, next) => {
             });
         }
 
-        // 🔐 Tokens
+        // ✅ If no OTP needed (like system admin), proceed
         const accessToken = generateToken(user._id, "access");
         const refreshToken = generateToken(user._id, "refresh");
 
@@ -359,6 +357,8 @@ exports.loginUser = async (req, res, next) => {
             httpOnly: true,
             secure: process.env.NODE_ENV === "production",
             sameSite: process.env.NODE_ENV === "production" ? "None" : "Lax",
+            // secure: false, // ✅ in dev
+            // sameSite: "None", // ✅ force sending in dev
             maxAge: 30 * 24 * 60 * 60 * 1000,
         });
 
@@ -366,21 +366,11 @@ exports.loginUser = async (req, res, next) => {
             httpOnly: true,
             secure: process.env.NODE_ENV === "production",
             sameSite: process.env.NODE_ENV === "production" ? "None" : "Lax",
+            // secure: false, // 🔥 localhost = false
+            // sameSite: "Lax", // 🔥 localhost = Lax
             maxAge: 30 * 24 * 60 * 60 * 1000,
         });
 
-        // 🧠 Construct companyProfile based on role
-        let companyProfile = null;
-
-        if (user.role === "companyAdmin") {
-            companyProfile = user.companyProfile || null;
-        } else if (user.role === "member" && user.company && user.company.companyProfile) {
-            companyProfile = user.company.companyProfile;
-        }
-
-        console.log("🚀 Final Company Profile:", companyProfile);
-
-        // ✅ Final Response
         res.status(200).json({
             accessToken,
             user: {
@@ -392,7 +382,6 @@ exports.loginUser = async (req, res, next) => {
                 isActive: user.isActive,
                 lastLogin: user.lastLogin,
                 createdAt: user.createdAt,
-                companyProfile, // 👈 added for both companyAdmin and member
             }
         });
 
@@ -416,10 +405,22 @@ exports.verifyLoginOTP = async (req, res, next) => {
 
         await OTP.deleteOne({ _id: otp._id });
 
-        const user = await User.findOne({ email });
+        const user = await User.findOne({ email })
+            .populate({
+                path: "company",
+                select: "companyProfile",
+            })
+            .lean();
+
         if (!user) return res.status(404).json({ message: "User not found" });
 
-        // 🧠 Create payload for token
+        let companyProfile = null;
+        if (user.role === "companyAdmin") {
+            companyProfile = user.companyProfile || null;
+        } else if (user.role === "member" && user.company?.companyProfile) {
+            companyProfile = user.company.companyProfile;
+        }
+
         const payload = {
             _id: user._id,
             name: user.name,
@@ -429,6 +430,7 @@ exports.verifyLoginOTP = async (req, res, next) => {
             isActive: user.isActive,
             lastLogin: user.lastLogin,
             createdAt: user.createdAt,
+            companyProfile, // ✅ this is now available to frontend
         };
 
         const accessToken = jwt.sign(payload, process.env.ACCESS_TOKEN_SECRET, {
