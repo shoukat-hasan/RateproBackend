@@ -637,10 +637,18 @@ exports.getMe = async (req, res, next) => {
 };
 
 exports.logoutUser = (req, res) => {
-    res.clearCookie("accessToken");
-    res.clearCookie("refreshToken");
+    const cookieOptions = {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: process.env.NODE_ENV === "production" ? "None" : "Lax",
+    };
+
+    res.clearCookie("accessToken", cookieOptions);
+    res.clearCookie("refreshToken", cookieOptions);
+
     res.status(200).json({ message: "Logged out" });
 };
+
 
 exports.refreshAccessToken = async (req, res, next) => {
     console.log("🌐 Refresh API called!");
