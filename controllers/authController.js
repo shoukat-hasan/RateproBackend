@@ -311,6 +311,8 @@ exports.loginUser = async (req, res, next) => {
                 select: "companyProfile",
             }).lean();
 
+        console.log("🔥 User from DB:", user);
+
         if (!user)
             return res.status(404).json({ message: "User not found" });
 
@@ -375,6 +377,8 @@ exports.loginUser = async (req, res, next) => {
         } else if (user.role === "member" && user.company && user.company.companyProfile) {
             companyProfile = user.company.companyProfile;
         }
+
+        console.log("🚀 Final Company Profile:", companyProfile);
 
         // ✅ Final Response
         res.status(200).json({
