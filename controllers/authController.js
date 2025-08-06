@@ -306,14 +306,17 @@ exports.loginUser = async (req, res, next) => {
         const { email, password, source = "public" } = req.body;
 
         const user = await User.findOne({ email });
-        
+
         // 👤 User not found
         if (!user) {
             return res.status(404).json({ message: "User not found" });
         }
 
-        if (!user || !(await bcrypt.compare(password, user.password)))
+        const isMatch = await bcrypt.compare(password, user.password);
+
+        if (!isMatch) {
             return res.status(401).json({ message: "Invalid email or password" });
+        }
 
         const isSystemAdmin = user.role === "admin" && user.email === "admin@ratepro.com";
 
