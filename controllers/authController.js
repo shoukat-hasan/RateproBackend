@@ -572,7 +572,6 @@ exports.updateProfile = async (req, res, next) => {
     }
 };
 
-
 exports.verifyResetCode = async (req, res) => {
     const { email, code } = req.body;
 
@@ -648,7 +647,6 @@ exports.logoutUser = (req, res) => {
 
     res.status(200).json({ message: "Logged out" });
 };
-
 
 exports.refreshAccessToken = async (req, res, next) => {
     console.log("🌐 Refresh API called!");

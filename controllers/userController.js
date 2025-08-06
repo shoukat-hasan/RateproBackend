@@ -135,6 +135,9 @@ exports.createUser = async (req, res, next) => {
         <p><strong>Login Email:</strong> ${email}</p>
         <p><strong>Temporary Password:</strong> ${password}</p>
         <p>You can now log in to your dashboard and complete the email verification process.</p>
+        <p><a href="${getBaseURL(req)}/login" target="_blank">${getBaseURL(req)}/login</a></p>
+    <p>Once on the login page, please enter the email and temporary password provided above.</p>
+    <br/>
         <p>Regards,<br/>Team</p>
       `,
     });
