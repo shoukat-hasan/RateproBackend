@@ -431,7 +431,7 @@ exports.resendOtp = async (req, res, next) => {
 
 exports.loginUser = async (req, res, next) => {
     try {
-        const { email, password, source = "public" } = req.body;
+        const { email, password, source } = req.body;
 
         const user = await User.findOne({ email });
         if (!user) {
@@ -475,7 +475,7 @@ exports.loginUser = async (req, res, next) => {
         }
 
         // 🔐 OTP check for companyAdmin/member
-        const needsOTP = (user.role === "companyAdmin" || user.role === "member") && !isSystemAdmin;
+        const needsOTP = source !== "public" && (user.role === "companyAdmin" || user.role === "member") && !isSystemAdmin;
 
         if (needsOTP) {
             await OTP.deleteMany({ email, purpose: "login_verify" });
