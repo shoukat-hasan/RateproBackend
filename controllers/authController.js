@@ -54,54 +54,93 @@ const generateOTP = () => Math.floor(100000 + Math.random() * 900000).toString()
 //         next(err);
 //     }
 // };
+// exports.registerUser = async (req, res, next) => {
+//     try {
+//         const { name, email, password } = req.body;
+
+//         const userExists = await User.findOne({ email });
+//         if (userExists) return res.status(400).json({ message: "Email already registered" });
+
+//         const hashedPassword = await bcrypt.hash(password, 12);
+//         const user = await User.create({ name, email, password: hashedPassword });
+
+//         const otpCode = generateOTP();
+//         const expiresAt = moment().add(process.env.OTP_EXPIRE_MINUTES, 'minutes').toDate();
+
+//         await OTP.create({ email, code: otpCode, expiresAt, purpose: "verify" });
+
+//         const origin = req.headers.origin || "";
+//         let source = "public";
+//         if (origin.includes("admin") && (role === "admin" || role === "companyAdmin")) {
+//             source = "admin";
+//         }
+
+//         if (!role || !["user", "company", "admin"].includes(role)) {
+//             return res.status(400).json({ message: "Invalid or missing role" });
+//         }
+
+//         const urls = getBaseURL();
+//         const baseURL = source === "admin" ? urls.admin : urls.public;
+
+//         const link = `${baseURL}/verify-email?code=${otpCode}&email=${email}`
+//         // const link = `${process.env.RATEPRO_URL}/verify-email?code=${otpCode}&email=${email}`;
+
+//         await sendEmail({
+//             to: email,
+//             subject: "Verify Your Email",
+//             html: `
+//     <p>Hello ${name || "user"},</p>
+//     <p>Or click this link to verify directly: <a href="${link}">${link}</a></p>
+//     <p>This link/code will expire in ${process.env.OTP_EXPIRE_MINUTES} minute(s).</p>
+//   `
+//         });
+
+
+//         res.status(201).json({ message: "User registered. verification link sent to email." });
+
+//     } catch (err) {
+//         next(err);
+//     }
+// };
+
 exports.registerUser = async (req, res, next) => {
     try {
-        const { name, email, password, role } = req.body;
+        const { name, email, password } = req.body;
 
         const userExists = await User.findOne({ email });
-        if (userExists) return res.status(400).json({ message: "Email already registered" });
+        if (userExists)
+            return res.status(400).json({ message: "Email already registered" });
 
         const hashedPassword = await bcrypt.hash(password, 12);
-        const user = await User.create({ name, email, password: hashedPassword, role });
+        const user = await User.create({ name, email, password: hashedPassword, role: "user" }); // 👈 Force role to "user"
 
         const otpCode = generateOTP();
         const expiresAt = moment().add(process.env.OTP_EXPIRE_MINUTES, 'minutes').toDate();
 
         await OTP.create({ email, code: otpCode, expiresAt, purpose: "verify" });
 
-        const origin = req.headers.origin || "";
-        let source = "public";
-        if (origin.includes("admin") && (role === "admin" || role === "company")) {
-            source = "admin";
-        }
-
-        if (!role || !["user", "company", "admin"].includes(role)) {
-            return res.status(400).json({ message: "Invalid or missing role" });
-        }
-
         const urls = getBaseURL();
-        const baseURL = source === "admin" ? urls.admin : urls.public;
+        const baseURL = urls.public; // 👈 Always public site
 
-        const link = `${baseURL}/verify-email?code=${otpCode}&email=${email}`
-        // const link = `${process.env.RATEPRO_URL}/verify-email?code=${otpCode}&email=${email}`;
+        const link = `${baseURL}/verify-email?code=${otpCode}&email=${email}`;
 
         await sendEmail({
             to: email,
             subject: "Verify Your Email",
             html: `
-    <p>Hello ${name || "user"},</p>
-    <p>Or click this link to verify directly: <a href="${link}">${link}</a></p>
-    <p>This link/code will expire in ${process.env.OTP_EXPIRE_MINUTES} minute(s).</p>
-  `
+                <p>Hello ${name || "user"},</p>
+                <p>Or click this link to verify directly: <a href="${link}">${link}</a></p>
+                <p>This link/code will expire in ${process.env.OTP_EXPIRE_MINUTES} minute(s).</p>
+            `
         });
 
-
-        res.status(201).json({ message: "User registered. verification link sent to email." });
+        res.status(201).json({ message: "User registered. Verification link sent to email." });
 
     } catch (err) {
         next(err);
     }
 };
+
 
 exports.verifyEmailLink = async (req, res, next) => {
     try {
@@ -129,6 +168,7 @@ exports.verifyEmailLink = async (req, res, next) => {
         return res.redirect(`${process.env.FRONTEND_URL}/login?message=error`);
     }
 };
+
 exports.verifyEmail = async (req, res, next) => {
     try {
         const { email, code } = req.body;
