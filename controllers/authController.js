@@ -532,7 +532,7 @@ exports.loginUser = async (req, res, next) => {
                 role: user.role,
                 avatar: user.avatar,
                 isActive: user.isActive,
-                isEmailVerified: user.isEmailVerified,
+                isVerified: user.isVerified,
                 lastLogin: user.lastLogin,
                 createdAt: user.createdAt,
             }
