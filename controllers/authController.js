@@ -567,6 +567,12 @@ exports.verifyLoginOTP = async (req, res, next) => {
 
         if (!user) return res.status(404).json({ message: "User not found" });
 
+        // ✅ Mark user as verified if not already
+        if (!user.isVerified) {
+            await User.updateOne({ _id: user._id }, { $set: { isVerified: true } });
+            console.log("✅ User marked as verified:", user.email);
+        }
+
         let companyProfile = null;
         if (user.role === "companyAdmin") {
             companyProfile = user.companyProfile || null;
