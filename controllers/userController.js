@@ -124,10 +124,7 @@ exports.createUser = async (req, res, next) => {
       : getBaseURL().public;
 
     // Send verification email
-    // BEFORE sending email
-    console.log("📤 Preparing to send email to:", email);
-
-    const emailResponse = await sendEmail({
+    await sendEmail({
       to: email,
       subject: "Your Account Has Been Created",
       html: `
@@ -143,7 +140,7 @@ exports.createUser = async (req, res, next) => {
       `,
     });
 
-    console.log("✅ Email sent successfully to:", email, "Response:", emailResponse);
+    console.log("✅ Email sent successfully to:", email);
 
     const userObj = user.toObject();
     delete userObj.password;

@@ -84,16 +84,12 @@ exports.protect = async (req, res, next) => {
     // ✅ 2. Always use ACCESS_TOKEN_SECRET to verify
     const decoded = jwt.verify(token, process.env.ACCESS_TOKEN_SECRET);
 
-    console.log("✅ Token decoded:", decoded);
-
     // ✅ 3. Make sure to access `decoded._id` (NOT `decoded.id`)
     const user = await User.findById(decoded._id).select("-password");
 
     if (!user) {
       return res.status(401).json({ message: "User not found" });
     }
-
-    console.log("👤 User from DB:", user);
 
     // ✅ 4. Attach user to request
     req.user = user;
