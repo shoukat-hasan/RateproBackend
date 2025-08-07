@@ -446,7 +446,7 @@ exports.loginUser = async (req, res, next) => {
         const isSystemAdmin = user.role === "admin" && user.email === "admin@ratepro.com";
 
         // 👇 Extra check for user role if not verified
-        if (user.role === "user" && !user.isEmailVerified) {
+        if (user.role === "user" && !user.isVerified) {
             // Send verification OTP (if not already sent)
             await OTP.deleteMany({ email, purpose: "verify" });
 
