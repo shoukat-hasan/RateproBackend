@@ -141,7 +141,6 @@ exports.registerUser = async (req, res, next) => {
     }
 };
 
-
 exports.verifyEmailLink = async (req, res, next) => {
     try {
         const { code, email } = req.query;
@@ -339,6 +338,97 @@ exports.resendOtp = async (req, res, next) => {
 //     }
 // };
 
+// exports.loginUser = async (req, res, next) => {
+//     try {
+//         const { email, password, source = "public" } = req.body;
+
+//         const user = await User.findOne({ email });
+//         if (!user) {
+//             return res.status(404).json({ message: "User not found" });
+//         }
+
+//         const isMatch = await bcrypt.compare(password, user.password);
+//         if (!isMatch) {
+//             return res.status(401).json({ message: "Invalid password" }); // 👈 yeh message important hai
+//         }
+
+//         const isSystemAdmin = user.role === "admin" && user.email === "admin@ratepro.com";
+
+//         // 🔐 Force OTP every time for companyAdmin/member
+//         const needsOTP = (user.role === "companyAdmin" || user.role === "member") && !isSystemAdmin;
+
+//         if (needsOTP) {
+//             // Clean previous OTPs
+//             await OTP.deleteMany({ email, purpose: "login_verify" });
+
+//             const otpCode = generateOTP();
+//             const expiresAt = moment().add(process.env.OTP_EXPIRE_MINUTES, "minutes").toDate();
+
+//             await OTP.create({ email, code: otpCode, expiresAt, purpose: "login_verify" });
+
+//             const urls = getBaseURL();
+//             const baseURL = source === "admin" ? urls.admin : urls.public;
+//             const link = `${baseURL}/verify-email?code=${otpCode}&email=${email}&login=true`;
+
+//             await sendEmail({
+//                 to: email,
+//                 subject: "Login Verification Code",
+//                 html: `
+//             <p>Hello ${user.name},</p>
+//             <p>Someone is trying to login using your credentials.</p>
+//             <p>Click to verify it's you: <a href="${link}">${link}</a></p>
+//             <p>This code will expire in ${process.env.OTP_EXPIRE_MINUTES} minute(s).</p>
+//           `
+//             });
+
+//             return res.status(401).json({
+//                 message: "Login verification required. A verification link has been sent to your email.",
+//             });
+//         }
+
+//         // ✅ If no OTP needed (like system admin), proceed
+//         const accessToken = generateToken(user._id, "access");
+//         const refreshToken = generateToken(user._id, "refresh");
+
+//         res.cookie("refreshToken", refreshToken, {
+//             httpOnly: true,
+//             secure: process.env.NODE_ENV === "production",
+//             sameSite: process.env.NODE_ENV === "production" ? "None" : "Lax",
+//             // secure: false, // ✅ in dev
+//             // sameSite: "None", // ✅ force sending in dev
+//             maxAge: 30 * 24 * 60 * 60 * 1000,
+//         });
+
+//         res.cookie("accessToken", accessToken, {
+//             httpOnly: true,
+//             secure: process.env.NODE_ENV === "production",
+//             sameSite: process.env.NODE_ENV === "production" ? "None" : "Lax",
+//             // secure: false, // 🔥 localhost = false
+//             // sameSite: "Lax", // 🔥 localhost = Lax
+//             maxAge: 30 * 24 * 60 * 60 * 1000,
+//         });
+
+//         res.status(200).json({
+//             accessToken,
+//             user: {
+//                 _id: user._id,
+//                 name: user.name,
+//                 email: user.email,
+//                 role: user.role,
+//                 avatar: user.avatar,
+//                 isActive: user.isActive,
+//                 lastLogin: user.lastLogin,
+//                 createdAt: user.createdAt,
+//             }
+//         });
+
+//     } catch (err) {
+//         console.error("Login Error:", err);
+//         next(err);
+//     }
+// };
+
+
 exports.loginUser = async (req, res, next) => {
     try {
         const { email, password, source = "public" } = req.body;
@@ -350,16 +440,44 @@ exports.loginUser = async (req, res, next) => {
 
         const isMatch = await bcrypt.compare(password, user.password);
         if (!isMatch) {
-            return res.status(401).json({ message: "Invalid password" }); // 👈 yeh message important hai
+            return res.status(401).json({ message: "Invalid password" });
         }
 
         const isSystemAdmin = user.role === "admin" && user.email === "admin@ratepro.com";
 
-        // 🔐 Force OTP every time for companyAdmin/member
+        // 👇 Extra check for user role if not verified
+        if (user.role === "user" && !user.isEmailVerified) {
+            // Send verification OTP (if not already sent)
+            await OTP.deleteMany({ email, purpose: "verify" });
+
+            const otpCode = generateOTP();
+            const expiresAt = moment().add(process.env.OTP_EXPIRE_MINUTES, "minutes").toDate();
+            await OTP.create({ email, code: otpCode, expiresAt, purpose: "verify" });
+
+            const urls = getBaseURL();
+            const baseURL = source === "admin" ? urls.admin : urls.public;
+            const link = `${baseURL}/verify-email?code=${otpCode}&email=${email}`;
+
+            await sendEmail({
+                to: email,
+                subject: "Verify Your Email",
+                html: `
+                    <p>Hello ${user.name},</p>
+                    <p>Please verify your email before logging in.</p>
+                    <p>Click here: <a href="${link}">${link}</a></p>
+                    <p>This link will expire in ${process.env.OTP_EXPIRE_MINUTES} minute(s).</p>
+                `
+            });
+
+            return res.status(401).json({
+                message: "Email not verified. A verification link has been sent to your email.",
+            });
+        }
+
+        // 🔐 OTP check for companyAdmin/member
         const needsOTP = (user.role === "companyAdmin" || user.role === "member") && !isSystemAdmin;
 
         if (needsOTP) {
-            // Clean previous OTPs
             await OTP.deleteMany({ email, purpose: "login_verify" });
 
             const otpCode = generateOTP();
@@ -375,11 +493,11 @@ exports.loginUser = async (req, res, next) => {
                 to: email,
                 subject: "Login Verification Code",
                 html: `
-            <p>Hello ${user.name},</p>
-            <p>Someone is trying to login using your credentials.</p>
-            <p>Click to verify it's you: <a href="${link}">${link}</a></p>
-            <p>This code will expire in ${process.env.OTP_EXPIRE_MINUTES} minute(s).</p>
-          `
+                    <p>Hello ${user.name},</p>
+                    <p>Someone is trying to login using your credentials.</p>
+                    <p>Click to verify it's you: <a href="${link}">${link}</a></p>
+                    <p>This code will expire in ${process.env.OTP_EXPIRE_MINUTES} minute(s).</p>
+                `
             });
 
             return res.status(401).json({
@@ -387,7 +505,7 @@ exports.loginUser = async (req, res, next) => {
             });
         }
 
-        // ✅ If no OTP needed (like system admin), proceed
+        // ✅ Generate tokens if no OTP/verification needed
         const accessToken = generateToken(user._id, "access");
         const refreshToken = generateToken(user._id, "refresh");
 
@@ -395,8 +513,6 @@ exports.loginUser = async (req, res, next) => {
             httpOnly: true,
             secure: process.env.NODE_ENV === "production",
             sameSite: process.env.NODE_ENV === "production" ? "None" : "Lax",
-            // secure: false, // ✅ in dev
-            // sameSite: "None", // ✅ force sending in dev
             maxAge: 30 * 24 * 60 * 60 * 1000,
         });
 
@@ -404,8 +520,6 @@ exports.loginUser = async (req, res, next) => {
             httpOnly: true,
             secure: process.env.NODE_ENV === "production",
             sameSite: process.env.NODE_ENV === "production" ? "None" : "Lax",
-            // secure: false, // 🔥 localhost = false
-            // sameSite: "Lax", // 🔥 localhost = Lax
             maxAge: 30 * 24 * 60 * 60 * 1000,
         });
 
@@ -418,6 +532,7 @@ exports.loginUser = async (req, res, next) => {
                 role: user.role,
                 avatar: user.avatar,
                 isActive: user.isActive,
+                isEmailVerified: user.isEmailVerified,
                 lastLogin: user.lastLogin,
                 createdAt: user.createdAt,
             }
