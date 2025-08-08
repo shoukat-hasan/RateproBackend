@@ -41,13 +41,13 @@ router.post("/logout", logoutUser);
 router.get("/me", protect, getMe);
 
 // Google OAuth
-router.get("/google", googleAuthStart); 
-// router.get("/google/callback", googleAuthCallback);
-router.get(
-  "/google/callback",
-  passport.authenticate("google", { failureRedirect: process.env.FRONTEND_URL + "/auth/failure" }),
-  authController.loginWithGoogle
-);
+// router.get("/google", googleAuthStart); 
+// // router.get("/google/callback", googleAuthCallback);
+// router.get(
+//   "/google/callback",
+//   passport.authenticate("google", { failureRedirect: process.env.FRONTEND_URL + "/auth/failure" }),
+//   authController.loginWithGoogle
+// );
 
 
 module.exports = router;

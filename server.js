@@ -104,12 +104,12 @@ const cookieParser = require("cookie-parser");
 const cors = require("cors");
 const path = require("path");
 const session = require("express-session");
-const passport = require("passport");
+// const passport = require("passport");
 const { globalLimiter } = require("./middlewares/rateLimiter");
 
 // Load .env config
 dotenv.config();
-require("./config/passportConfig"); // Google Strategy config
+// require("./config/passportConfig"); // Google Strategy config
 
 // MongoDB connection
 connectDB();
