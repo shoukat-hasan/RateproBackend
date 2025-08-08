@@ -156,8 +156,8 @@ app.use(
 );
 
 // === Passport Middleware ===
-app.use(passport.initialize());
-app.use(passport.session());
+// app.use(passport.initialize());
+// app.use(passport.session());
 
 // === Routes ===
 app.use("/api/auth", require("./routes/authRoutes"));
