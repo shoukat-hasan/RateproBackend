@@ -5,6 +5,7 @@ const router = express.Router();
 const upload = require("../middlewares/multer");
 const { protect } = require("../middlewares/authMiddleware");
 const { authLimiter } = require("../middlewares/rateLimiter");
+const passport = require("passport");
 
 const {
   registerUser,
@@ -39,7 +40,14 @@ router.put("/update-profile", protect, upload.single("avatar"), updateProfile);
 router.post("/logout", logoutUser);
 router.get("/me", protect, getMe);
 
-
+// Google OAuth
+router.get("/google", googleAuthStart); 
+// router.get("/google/callback", googleAuthCallback);
+router.get(
+  "/google/callback",
+  passport.authenticate("google", { failureRedirect: process.env.FRONTEND_URL + "/auth/failure" }),
+  authController.loginWithGoogle
+);
 
 
 module.exports = router;

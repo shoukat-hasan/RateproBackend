@@ -428,7 +428,6 @@ exports.resendOtp = async (req, res, next) => {
 //     }
 // };
 
-
 exports.loginUser = async (req, res, next) => {
     try {
         const { email, password, source } = req.body;
@@ -854,3 +853,36 @@ exports.refreshAccessToken = async (req, res, next) => {
         return res.status(401).json({ message: "Invalid refresh token" });
     }
 };
+
+exports.loginWithGoogle = async (req, res) => {
+    try {
+      const user = req.user; // Passport ne populate kiya
+  
+      // Access + Refresh token generate
+      const accessToken = generateToken(user._id, "access");
+      const refreshToken = generateToken(user._id, "refresh");
+  
+      // Refresh token cookie
+      res.cookie("refreshToken", refreshToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: process.env.NODE_ENV === "production" ? "None" : "Lax",
+        maxAge: 30 * 24 * 60 * 60 * 1000,
+      });
+  
+      // Access token cookie
+      res.cookie("accessToken", accessToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: process.env.NODE_ENV === "production" ? "None" : "Lax",
+        maxAge: 24 * 60 * 60 * 1000,
+      });
+  
+      // Redirect frontend with success
+      res.redirect(`${process.env.FRONTEND_URL}/auth/success?token=${accessToken}`);
+    } catch (error) {
+      console.error("Google login error:", error);
+      res.redirect(`${process.env.FRONTEND_URL}/auth/failure`);
+    }
+  };
+  
