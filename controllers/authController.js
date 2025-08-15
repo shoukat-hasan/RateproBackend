@@ -230,19 +230,26 @@ exports.loginUser = async (req, res, next) => {
             maxAge: 30 * 24 * 60 * 60 * 1000,
         });
 
+        const safeUser = {
+            _id: user._id,
+            name: user.name,
+            email: user.email,
+            role: user.role,
+            roles: user.roles,
+            authProvider: user.authProvider,
+            bio: user.bio,
+            phone: user.phone,
+            isActive: user.isActive,
+            isVerified: user.isVerified,
+            surveyStats: user.surveyStats,
+            companyProfile: user.companyProfile,
+            createdAt: user.createdAt,
+            updatedAt: user.updatedAt
+          };
+
         res.status(200).json({
             accessToken,
-            user: {
-                _id: user._id,
-                name: user.name,
-                email: user.email,
-                role: user.role,
-                avatar: user.avatar,
-                isActive: user.isActive,
-                isVerified: user.isVerified,
-                lastLogin: user.lastLogin,
-                createdAt: user.createdAt,
-            }
+            user : safeUser
         });
 
     } catch (err) {
