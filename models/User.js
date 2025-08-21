@@ -1,4 +1,4 @@
-// // // models/User.js
+// models/User.js
 // const mongoose = require("mongoose");
 
 // const userSchema = new mongoose.Schema(
@@ -123,7 +123,7 @@
 //   },
 
 //   // High-level type (quick checks)
-//   role: { type: String, enum: ["admin", "company", "user"], default: "user" },
+//   role: { type: String, enum: ["admin", "companyAdmin", "user"], default: "user" },
 
 //   // Fine-grained roles/permissions
 //   roles: [{ type: mongoose.Schema.Types.ObjectId, ref: "Role" }],
@@ -157,129 +157,239 @@
 
 // module.exports = mongoose.model("User", userSchema);
 
-const mongoose = require("mongoose");
+// const mongoose = require("mongoose");
 
-const userSchema = new mongoose.Schema(
-  {
-    // Basic Info
-    name: {
-      type: String,
-      required: [true, "Name is required"],
-      trim: true,
-    },
-    email: {
-      type: String,
-      required: [true, "Email is required"],
-      unique: true,
-      lowercase: true,
-    },
+// const userSchema = new mongoose.Schema(
+//   {
+//     // Basic Info
+//     name: {
+//       type: String,
+//       required: [true, "Name is required"],
+//       trim: true,
+//     },
+//     email: {
+//       type: String,
+//       required: [true, "Email is required"],
+//       unique: true,
+//       lowercase: true,
+//     },
 
-    // Auth Provider
-    authProvider: {
-      type: String,
-      enum: ["local", "google"],
-      default: "local",
-    },
-    googleId: {
-      type: String,
-      unique: true,
-      sparse: true,
-    },
+//     // Auth Provider
+//     authProvider: {
+//       type: String,
+//       enum: ["local", "google"],
+//       default: "local",
+//     },
+//     googleId: {
+//       type: String,
+//       unique: true,
+//       sparse: true,
+//     },
 
-    // Password
-    password: {
-      type: String,
-      required: function () {
-        return this.authProvider === "local";
-      },
-      minlength: 6,
-    },
+//     // Password
+//     password: {
+//       type: String,
+//       required: function () {
+//         return this.authProvider === "local";
+//       },
+//       minlength: 6,
+//     },
 
-    // Profile Info
-    phone: { type: String },
-    bio: { type: String, default: "" },
-    avatar: {
-      public_id: { type: String },
-      url: { type: String },
-    },
+//     // Profile Info
+//     phone: { type: String },
+//     bio: { type: String, default: "" },
+//     avatar: {
+//       public_id: { type: String },
+//       url: { type: String },
+//     },
 
-    // High-level Role
-    role: {
-      type: String,
-      enum: ["admin", "companyAdmin", "company", "member", "user"],
-      default: "user",
-    },
+//     // High-level Role
+//     role: {
+//       type: String,
+//       enum: ["admin", "companyAdmin", "company", "member", "user"],
+//       default: "user",
+//     },
 
-    // Fine-grained Roles/Permissions
-    roles: [{ type: mongoose.Schema.Types.ObjectId, ref: "Role" }],
+//     // Fine-grained Roles/Permissions
+//     roles: [{ type: mongoose.Schema.Types.ObjectId, ref: "Role" }],
 
-    // Tenant / Company Association
-    tenant: { type: mongoose.Schema.Types.ObjectId, ref: "Tenant", default: null },
+//     // Tenant / Company Association
+//     tenant: { type: mongoose.Schema.Types.ObjectId, ref: "Tenant", default: null },
 
-    // Company-specific Links
-    company: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "User",
-      required: function () {
-        return this.role === "member";
-      },
-    },
+//     // Company-specific Links
+//     company: {
+//       type: mongoose.Schema.Types.ObjectId,
+//       ref: "User",
+//       required: function () {
+//         return this.role === "member";
+//       },
+//     },
 
-    department: {
-      type: String,
-      default: null,
-      required: function () {
-        return this.role === "member";
-      },
-    },
+//     department: {
+//       type: String,
+//       default: null,
+//       required: function () {
+//         return this.role === "member";
+//       },
+//     },
 
-    // Company Profile — for "companyAdmin"
-    companyProfile: {
-      name: { type: String },
-      contactEmail: { type: String },
-      contactPhone: { type: String },
-      website: { type: String },
-      address: { type: String },
-      totalEmployees: { type: Number },
-      departments: [
-        {
-          name: { type: String, required: true },
-          head: { type: String },
-        },
-      ],
-    },
+//     // Company Profile — for "companyAdmin"
+//     companyProfile: {
+//       name: { type: String },
+//       contactEmail: { type: String },
+//       contactPhone: { type: String },
+//       website: { type: String },
+//       address: { type: String },
+//       totalEmployees: { type: Number },
+//       departments: [
+//         {
+//           name: { type: String, required: true },
+//           head: { type: String },
+//         },
+//       ],
+//     },
 
-    // Status Flags
-    isVerified: { type: Boolean, default: false },
-    isActive: { type: Boolean, default: true },
-    deleted: { type: Boolean, default: false },
+//     // Status Flags
+//     isVerified: { type: Boolean, default: false },
+//     isActive: { type: Boolean, default: true },
+//     deleted: { type: Boolean, default: false },
 
-    // Tokens
-    resetPasswordToken: String,
-    resetPasswordExpire: Date,
-    emailVerificationToken: String,
-    emailTokenExpire: Date,
+//     // Tokens
+//     resetPasswordToken: String,
+//     resetPasswordExpire: Date,
+//     emailVerificationToken: String,
+//     emailTokenExpire: Date,
 
-    // Stats
-    surveyStats: {
-      totalSurveysTaken: { type: Number, default: 0 },
-      totalResponses: { type: Number, default: 0 },
-      averageScore: { type: Number, default: 0 },
-    },
+//     // Stats
+//     surveyStats: {
+//       totalSurveysTaken: { type: Number, default: 0 },
+//       totalResponses: { type: Number, default: 0 },
+//       averageScore: { type: Number, default: 0 },
+//     },
 
-    // Tracking
-    createdBy: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "User",
-      default: null,
-    },
+//     // Tracking
+//     createdBy: {
+//       type: mongoose.Schema.Types.ObjectId,
+//       ref: "User",
+//       default: null,
+//     },
+//   },
+//   { timestamps: true }
+// );
+
+// // Indexes for faster queries
+// userSchema.index({ email: 1 });
+// userSchema.index({ tenant: 1 });
+// userSchema.index({ deleted: 1 });
+
+// module.exports = mongoose.model("User", userSchema);
+
+const mongoose = require('mongoose');
+
+const userSchema = new mongoose.Schema({
+  name: {
+    type: String,
+    required: [true, "Name is required"],
+    trim: true,
   },
-  { timestamps: true }
-);
+  email: {
+    type: String,
+    required: [true, "Email is required"],
+    unique: true,
+    lowercase: true,
+  },
+  authProvider: {
+    type: String,
+    enum: ["local", "google"],
+    default: "local",
+  },
+  googleId: {
+    type: String,
+    unique: true,
+    sparse: true,
+  },
+  password: {
+    type: String,
+    required: function () {
+      return this.authProvider === "local";
+    },
+    minlength: 6,
+  },
+  phone: { type: String },
+  bio: { type: String, default: "" },
+  avatar: {
+    public_id: { type: String },
+    url: { type: String },
+  },
+  role: {
+    type: String,
+    enum: ["admin", "companyAdmin", "member", "user"],
+    default: "user", // default for public signup
+  },
+  customRoles: [
+    {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "CustomRole",
+      default: [],
+    }
+  ],
+  isVerified: {
+    type: Boolean,
+    default: false,
+  },
+  isActive: {
+    type: Boolean,
+    default: true,
+  },
+  deactivatedBy: { type: String, enum: ["admin", "companyAdmin", null], default: null },
+  // Auth Tokens
+  resetPasswordToken: String,
+  resetPasswordExpire: Date,
+  emailVerificationToken: String,
+  emailTokenExpire: Date,
+  // Creator reference
+  createdBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "User",
+    default: null,
+  },
+  // Link to Tenant (for companyAdmin and members)
+  tenant: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "Tenant",
+    required: function () {
+      return this.role === "companyAdmin" || this.role === "member";
+    },
+    default: null,
+  },
+  // Link to Department (for members, if defined)
+  department: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "Department",
+    required: function () {
+      return this.role === "member";
+    },
+    default: null,
+  },
+  // Link to SurveyStats (for users who take surveys)
+  surveyStats: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "SurveyStats",
+    default: null,
+  },
+  deleted: {
+    type: Boolean,
+    default: false,
+  },
+}, { timestamps: true });
 
-// Indexes for faster queries
-userSchema.index({ email: 1 });
-userSchema.index({ tenant: 1 });
-userSchema.index({ deleted: 1 });
+// Hooks for validation (e.g., before save)
+userSchema.pre('save', function (next) {
+  if (this.role === 'member' && !this.tenant) {
+    return next(new Error('Tenant required for members'));
+  }
+  // Similar for other conditions
+  next();
+});
 
-module.exports = mongoose.model("User", userSchema);
+module.exports = mongoose.model('User', userSchema);
