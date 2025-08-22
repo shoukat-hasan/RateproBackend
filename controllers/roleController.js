@@ -64,6 +64,7 @@
 //   } catch (err) { next(err); }
 // };
 
+const mongoose = require('mongoose');
 const CustomRole = require("../models/CustomRole");
 const User = require("../models/User");
 const Permission = require("../models/Permission");
@@ -93,80 +94,71 @@ const removeRoleSchema = Joi.object({
   roleId: Joi.string().hex().length(24).required(),
 });
 
-exports.createRole = async (req, res, next) => {
+exports.createRole = async (req, res) => {
   try {
-    const { error } = createRoleSchema.validate(req.body);
-    if (error) return res.status(400).json({ message: error.details[0].message });
-
-    const { name, permissions = [], description, tenantId } = req.body;
-
-    // Restrict to admin or companyAdmin
-    if (!["admin", "companyAdmin"].includes(req.user.role)) {
-      return res.status(403).json({ message: "Only admin or companyAdmin can create roles" });
+    const { name, permissions, description, tenantId } = req.body;
+    if (!name || !permissions || !tenantId) {
+      return res.status(400).json({ message: "Name, permissions, and tenantId are required" });
     }
-
-    // Tenant scoping
-    let tenant = tenantId || req.tenantId;
-    if (!tenant && req.user.role !== "admin") {
-      return res.status(400).json({ message: "tenantId required for companyAdmin" });
+    if (!req.user.tenant || !req.user.tenant._id) {
+      return res.status(403).json({ message: "User has no associated tenant" });
     }
-    if (req.user.role === "companyAdmin" && tenantId && tenantId !== req.tenantId) {
-      return res.status(403).json({ message: "Cannot create role for another tenant" });
+    if (req.user.tenant._id.toString() !== tenantId) {
+      return res.status(403).json({
+        message: `Cannot create role for another tenant. User tenant: ${req.user.tenant._id}, Payload tenant: ${tenantId}`,
+      });
     }
-
-    // Validate permissions
-    if (permissions.length > 0) {
-      const validPermissions = await Permission.find({ _id: { $in: permissions } });
-      if (validPermissions.length !== permissions.length) {
-        return res.status(400).json({ message: "Invalid permission IDs" });
-      }
+    const existingRole = await CustomRole.findOne({ name, tenant: tenantId });
+    if (existingRole) {
+      return res.status(400).json({ message: "Role already exists" });
     }
-
-    const roleExists = await CustomRole.findOne({ name, tenant });
-    if (roleExists) return res.status(400).json({ message: "Role already exists in this tenant" });
-
+    const validPermissions = await Permission.find({ _id: { $in: permissions } });
+    if (validPermissions.length !== permissions.length) {
+      return res.status(400).json({ message: "Invalid permissions provided" });
+    }
     const role = await CustomRole.create({
       name,
       permissions,
       description,
-      tenant: req.user.role === "admin" && !tenantId ? null : tenant,
+      tenant: tenantId, // Changed from tenantId to tenant
       createdBy: req.user._id,
     });
-
-    const populatedRole = await CustomRole.findById(role._id).populate("permissions tenant");
-
-    res.status(201).json({ message: "Role created", role: populatedRole });
-  } catch (err) {
-    console.error("Error creating role:", err);
-    next(err);
+    res.status(201).json({ role });
+  } catch (error) {
+    console.error("Error creating role:", error);
+    res.status(500).json({ message: "Failed to create role", error: error.message });
   }
 };
 
 exports.getRoles = async (req, res, next) => {
   try {
     const { error } = getRolesSchema.validate(req.query);
-    if (error) return res.status(400).json({ message: error.details[0].message });
+    if (error) {
+      return res.status(400).json({ message: error.details[0].message });
+    }
 
     const { tenantId } = req.query;
 
-    // Restrict to admin or companyAdmin
-    if (!["admin", "companyAdmin"].includes(req.user.role)) {
-      return res.status(403).json({ message: "Only admin or companyAdmin can view roles" });
+    if (!["companyAdmin"].includes(req.user.role)) {
+      return res.status(403).json({ message: "Only companyAdmin can view roles" });
     }
 
-    // Tenant scoping
     let query = {};
     if (req.user.role === "companyAdmin") {
-      query.tenant = req.tenantId;
+      if (!req.tenantId) {
+        console.error("TenantId is undefined for companyAdmin");
+        return res.status(400).json({ message: "TenantId is required for companyAdmin" });
+      }
+      query.tenant = new mongoose.Types.ObjectId(req.tenantId); 
     } else if (req.user.role === "admin" && tenantId) {
-      query.tenant = tenantId;
+      query.tenant = new mongoose.Types.ObjectId(tenantId); 
     } else if (req.user.role === "admin") {
       query.tenant = null;
     }
 
     const roles = await CustomRole.find(query).populate("permissions tenant");
-
-    res.status(200).json({ message: "Roles retrieved", roles });
+    const total = await CustomRole.countDocuments(query);
+    res.status(200).json({ message: "Roles retrieved", roles, total });
   } catch (err) {
     console.error("Error getting roles:", err);
     next(err);
@@ -182,9 +174,8 @@ exports.assignRoleToUser = async (req, res, next) => {
     const { userId } = req.params;
     const { roleId } = req.body;
 
-    // Restrict to admin or companyAdmin
-    if (!["admin", "companyAdmin"].includes(req.user.role)) {
-      return res.status(403).json({ message: "Only admin or companyAdmin can assign roles" });
+    if (!["companyAdmin"].includes(req.user.role)) {
+      return res.status(403).json({ message: "Only companyAdmin can assign roles" });
     }
 
     const role = await CustomRole.findById(roleId).populate("tenant");
@@ -193,13 +184,11 @@ exports.assignRoleToUser = async (req, res, next) => {
     const user = await User.findById(userId);
     if (!user) return res.status(404).json({ message: "User not found" });
 
-    // Ensure role assignment only to members
     if (user.role !== "member") {
       return res.status(400).json({ message: "Can only assign roles to members" });
     }
 
-    // Tenant scoping
-    if (req.user.role !== "admin" && role.tenant && role.tenant.toString() !== req.tenantId) {
+    if (req.user.role !== "admin" && role.tenant && role.tenant._id.toString() !== req.tenantId) {
       return res.status(403).json({ message: "Cannot assign role from different tenant" });
     }
     if (req.user.role !== "admin" && user.tenant && user.tenant.toString() !== req.tenantId) {
@@ -230,9 +219,9 @@ exports.removeRoleFromUser = async (req, res, next) => {
     const { userId } = req.params;
     const { roleId } = req.body;
 
-    // Restrict to admin or companyAdmin
-    if (!["admin", "companyAdmin"].includes(req.user.role)) {
-      return res.status(403).json({ message: "Only admin or companyAdmin can remove roles" });
+    // Restrict to companyAdmin
+    if (!["companyAdmin"].includes(req.user.role)) {
+      return res.status(403).json({ message: "Only companyAdmin can remove roles" });
     }
 
     const role = await CustomRole.findById(roleId).populate("tenant");
@@ -265,21 +254,30 @@ exports.updateRole = async (req, res, next) => {
   try {
     const { error: bodyError } = createRoleSchema.validate(req.body);
     const { error: paramError } = Joi.object({ roleId: Joi.string().hex().length(24).required() }).validate(req.params);
-    if (bodyError || paramError) return res.status(400).json({ message: (bodyError || paramError).details[0].message });
+    if (bodyError || paramError) {
+      return res.status(400).json({ message: (bodyError || paramError).details[0].message });
+    }
 
     const { roleId } = req.params;
-    const { name, permissions, description } = req.body;
+    const { name, permissions, description, tenantId } = req.body;
 
-    // Restrict to admin or companyAdmin
-    if (!["admin", "companyAdmin"].includes(req.user.role)) {
-      return res.status(403).json({ message: "Only admin or companyAdmin can update roles" });
+    // Restrict to companyAdmin
+    if (!["companyAdmin"].includes(req.user.role)) {
+      return res.status(403).json({ message: "Only companyAdmin can update roles" });
     }
 
     const role = await CustomRole.findById(roleId).populate("tenant");
-    if (!role) return res.status(404).json({ message: "Role not found" });
+    if (!role) {
+      return res.status(404).json({ message: "Role not found" });
+    }
 
     // Tenant scoping
-    if (req.user.role !== "admin" && role.tenant && role.tenant.toString() !== req.tenantId) {
+    if (
+      req.user.role !== "admin" &&
+      role.tenant &&
+      role.tenant._id &&
+      role.tenant._id.toString() !== req.tenantId
+    ) {
       return res.status(403).json({ message: "Cannot update role from different tenant" });
     }
 
@@ -291,9 +289,11 @@ exports.updateRole = async (req, res, next) => {
       }
     }
 
+    // Update role fields
     role.name = name || role.name;
     role.permissions = permissions || role.permissions;
     role.description = description || role.description;
+    role.tenant = tenantId || role.tenant; // Update tenant if provided
 
     await role.save();
 
@@ -313,16 +313,21 @@ exports.deleteRole = async (req, res, next) => {
 
     const { roleId } = req.params;
 
-    // Restrict to admin or companyAdmin
-    if (!["admin", "companyAdmin"].includes(req.user.role)) {
-      return res.status(403).json({ message: "Only admin or companyAdmin can delete roles" });
+    // Restrict to companyAdmin
+    if (!["companyAdmin"].includes(req.user.role)) {
+      return res.status(403).json({ message: "Only companyAdmin can delete roles" });
     }
 
     const role = await CustomRole.findById(roleId).populate("tenant");
     if (!role) return res.status(404).json({ message: "Role not found" });
 
     // Tenant scoping
-    if (req.user.role !== "admin" && role.tenant && role.tenant.toString() !== req.tenantId) {
+    if (
+      req.user.role !== "admin" &&
+      role.tenant &&
+      role.tenant._id &&
+      role.tenant._id.toString() !== req.tenantId
+    ) {
       return res.status(403).json({ message: "Cannot delete role from different tenant" });
     }
 

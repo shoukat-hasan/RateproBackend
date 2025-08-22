@@ -59,10 +59,7 @@ const departmentSchema = new mongoose.Schema({
     required: true,
   },
   name: { type: String, required: true },
-  // head: { 
-  //   type: mongoose.Schema.Types.ObjectId,
-  //   ref: "User", // Member as head
-  // },
+  
   head: { 
     type: String, // Changed to String for manual name input
     default: "",
@@ -70,3 +67,7 @@ const departmentSchema = new mongoose.Schema({
 }, { timestamps: true });
 
 module.exports = mongoose.model('Department', departmentSchema);
+// head: { 
+  //   type: mongoose.Schema.Types.ObjectId,
+  //   ref: "User", // Member as head
+  // },

@@ -481,18 +481,14 @@ const generateOTP = () => Math.floor(100000 + Math.random() * 900000).toString()
 
 // Validation Schemas
 const createUserSchema = Joi.object({
+  name: Joi.string().min(2).max(50).required(),
   email: Joi.string().email().required(),
   password: Joi.string().min(6).required(),
-  name: Joi.string().required(),
-  role: Joi.string().valid("admin", "companyAdmin", "member", "user").default("user"),
-  tenant: Joi.string().hex().length(24).optional(),
-  department: Joi.string().hex().length(24).optional(),
-  isActive: Joi.boolean().default(true),
-  companyName: Joi.string().when("role", {
-    is: "companyAdmin",
-    then: Joi.string().required(),
-    otherwise: Joi.forbidden(),
-  }),
+  isActive: Joi.boolean().optional(),
+  role: Joi.string().valid("admin", "companyAdmin", "member").required(),
+  tenantName: Joi.string().min(2).max(100).optional(),
+  department: Joi.string().optional(),
+  tenant: Joi.string().optional(),
 });
 
 const updateUserSchema = Joi.object({
@@ -531,9 +527,9 @@ const notificationSchema = Joi.object({
 const updateMeSchema = Joi.object({
   name: Joi.string().min(2).max(50).optional(),
   email: Joi.string().email().optional(),
-  phone: Joi.string().optional(),
-  bio: Joi.string().optional(),
-  department: Joi.string().optional(),
+  phone: Joi.string().allow("").optional(),
+  bio: Joi.string().allow("").optional(),
+  department: Joi.string().allow("").optional(),
   tenant: Joi.object({
     name: Joi.string().optional(),
     address: Joi.string().optional(),
@@ -547,74 +543,35 @@ const updateMeSchema = Joi.object({
 
 exports.createUser = async (req, res) => {
   try {
-    console.log('===== CREATE USER START =====', { url: req.originalUrl, body: req.body, userId: req.user._id });
-    console.log('Req.body:', req.body);
-    console.log('LoggedIn User:', {
-      id: req.user._id,
-      role: req.user.role,
-      tenant: req.user.tenant ? req.user.tenant._id?.toString() : req.user.tenant,
-    });
+    // Validate request
+    const { error } = createUserSchema.validate(req.body);
+    if (error) {
+      return res.status(400).json({ message: error.details[0].message });
+    }
 
-    const { name, email, password, role, tenant, department, companyName } = req.body;
+    const { name, email, password, role, tenant, department, tenantName } = req.body;
     const currentUser = req.user;
-
-    // Duplicate email check
     const existingUser = await User.findOne({ email });
-    console.log('ExistingUser:', existingUser ? existingUser._id : 'none');
     if (existingUser) {
       return res.status(400).json({ message: 'User already exists with this email.' });
     }
-
-    // Role-based creation rules
-    console.log('Role check: currentUser.role =', currentUser.role, '| requested role =', role);
     if (currentUser.role === 'admin' && !['companyAdmin', 'user'].includes(role)) {
       return res.status(403).json({ message: 'Admin can only create CompanyAdmin or User.' });
     }
-
     if (currentUser.role === 'companyAdmin' && role !== 'member') {
       return res.status(403).json({ message: 'CompanyAdmin can only create Member role.' });
-    }
-
-    if (currentUser.role === 'member') {
-      console.log('Fetching customRoles for member:', currentUser._id);
-      const userWithRoles = await User.findById(currentUser._id).populate({
-        path: 'customRoles',
-        match: { isActive: true, deleted: false },
-        populate: { path: 'permissions', select: 'name' },
-      });
-
-      console.log('userWithRoles.customRoles:', JSON.stringify(userWithRoles.customRoles, null, 2));
-
-      const hasPermission = userWithRoles.customRoles?.some((role) =>
-        role.permissions.some((perm) => perm.name === 'user:create')
-      );
-
-      console.log('Member has createUser permission?', hasPermission);
-
-      if (!hasPermission) {
-        return res.status(403).json({ message: 'Permission denied: You cannot create users.' });
-      }
-
-      if (role !== 'member') {
-        return res.status(403).json({ message: 'Members can only create other Members.' });
-      }
     }
 
     // Tenant validation
     let tenantId = tenant;
     if (currentUser.role === 'companyAdmin' && role === 'member') {
       if (!currentUser.tenant) {
-        console.log('createUser: No tenant found for currentUser', { userId: currentUser._id });
         return res.status(403).json({ message: 'Access denied: No tenant associated with this user' });
       }
       const userTenantId = currentUser.tenant._id ? currentUser.tenant._id.toString() : currentUser.tenant;
-      console.log('Tenant Validation:', { providedTenant: tenant, userTenantId });
-
-      if (!tenant) {
-        tenantId = userTenantId;
-        console.log('Tenant auto-injected:', tenantId);
-      } else if (tenant !== userTenantId) {
-        console.log('createUser: Tenant mismatch', { providedTenant: tenant, userTenantId });
+      tenantId = tenant || userTenantId;
+      if (tenant && tenant !== userTenantId) {
+        console.log('Tenant mismatch');
         return res.status(403).json({ message: 'Access denied: Invalid tenant' });
       }
     }
@@ -622,17 +579,10 @@ exports.createUser = async (req, res) => {
     // Validate department belongs to tenant
     if (role === 'member' && department) {
       if (!mongoose.Types.ObjectId.isValid(tenantId)) {
-        console.log('createUser: Invalid tenantId', { tenantId });
         return res.status(400).json({ message: 'Invalid tenant ID' });
       }
       const tenantData = await Tenant.findById(tenantId).populate('departments');
-      console.log(
-        'TenantData Departments:',
-        tenantData ? tenantData.departments.map((d) => d._id.toString()) : 'No tenant found'
-      );
-
       if (!tenantData || !tenantData.departments.some((d) => d._id.toString() === department)) {
-        console.log('createUser: Invalid department', { department, tenantId });
         return res.status(400).json({ message: 'Invalid department for this tenant' });
       }
     }
@@ -641,8 +591,8 @@ exports.createUser = async (req, res) => {
     const hashedPassword = await bcrypt.hash(password, 10);
 
     let newUser;
+
     if (role === 'companyAdmin') {
-      console.log('Creating companyAdmin user with tenant...');
       const tempUser = new User({
         name,
         email,
@@ -657,7 +607,7 @@ exports.createUser = async (req, res) => {
       await tempUser.save({ validateBeforeSave: false });
 
       const newTenant = await Tenant.create({
-        name: companyName || `${name}'s Company`,
+        name: tenantName && tenantName.trim() !== '' ? tenantName : `${name}'s Company`,
         admin: tempUser._id,
         createdBy: currentUser._id,
       });
@@ -668,12 +618,7 @@ exports.createUser = async (req, res) => {
       newUser = tempUser;
       tenantId = newTenant._id;
 
-      console.log('New CompanyAdmin + Tenant Created:', { tenantId, userId: newUser._id });
     } else {
-      if (role === 'member') {
-        console.log('Creating Member with tenantId:', tenantId);
-      }
-
       newUser = await User.create({
         name,
         email,
@@ -684,28 +629,35 @@ exports.createUser = async (req, res) => {
         isVerified: false,
         createdBy: currentUser._id,
       });
-
-      console.log('New User Created:', { userId: newUser._id, role: newUser.role, tenant: newUser.tenant });
     }
 
     // OTP
     const verificationCode = generateOTP();
     const expiresAt = moment().add(process.env.OTP_EXPIRE_MINUTES || 15, 'minutes').toDate();
     await OTP.create({ email, code: verificationCode, purpose: 'verify', expiresAt });
+    console.log('OTP generated:', verificationCode);
 
     const baseURLs = getBaseURL();
     const baseURL = role === 'user' ? baseURLs.public : baseURLs.admin;
     const verificationLink = `${baseURL}/verify-email?code=${verificationCode}&email=${encodeURIComponent(email)}`;
 
-    console.log('Verification Link:', verificationLink);
-
+    // Email HTML
+    const emailHTML = `
+      <p>Hello ${name},</p>
+      <p>Your account has been successfully created.</p>
+      <p><strong>Login Email:</strong> ${email}</p>
+      <p><strong>Temporary Password:</strong> ${password}</p>
+      <p>Please verify your email by clicking the link below:</p>
+      <p><a href="${verificationLink}" target="_blank">${verificationLink}</a></p>
+      <p>This code will expire in ${process.env.OTP_EXPIRE_MINUTES} minute(s).</p>
+      <br/>
+      <p>Regards,<br/>Team</p>
+    `;
     await sendEmail({
       to: email,
       subject: 'Verify your email - RatePro',
-      html: `<p>Verify here: <a href="${verificationLink}">${verificationLink}</a></p>`,
+      html: emailHTML,
     });
-
-    console.log('Email sent successfully!');
 
     res.status(201).json({
       message: 'User created successfully. Verification email sent.',
@@ -717,8 +669,6 @@ exports.createUser = async (req, res) => {
         isVerified: newUser.isVerified,
       },
     });
-
-    console.log('===== CREATE USER END =====');
   } catch (err) {
     console.error('CreateUser error:', err);
     res.status(500).json({ message: 'Internal Server Error' });
@@ -755,7 +705,6 @@ exports.updateUser = async (req, res, next) => {
 
     // ----- ISACTIVE LOGIC (direct update allowed) -----
     if (typeof updates.isActive !== "undefined") {
-      console.log("⚡ isActive Update Detected:", updates.isActive);
       if (!updates.isActive) {
         updates.deactivatedBy = req.user.role; // jisne deactivate kiya
       } else {
@@ -779,56 +728,6 @@ exports.updateUser = async (req, res, next) => {
     next(error);
   }
 };
-
-// exports.deleteUser = async (req, res, next) => {
-//   try {
-//     const { error } = idSchema.validate(req.params);
-//     if (error) return res.status(400).json({ message: error.details[0].message });
-
-//     const targetUser = await User.findById(req.params.id);
-//     if (!targetUser) return res.status(404).json({ message: "User not found" });
-
-//     // Tenant scoping
-//     if (req.user.role !== "admin" && targetUser.tenant && req.tenantId !== targetUser.tenant.toString()) {
-//       return res.status(403).json({ message: "Access denied: Wrong tenant" });
-//     }
-
-//     // Role-based checks
-//     if (req.user.role === "companyAdmin" && targetUser.role !== "member") {
-//       return res.status(403).json({ message: "CompanyAdmin can only delete members" });
-//     }
-//     if (req.user.role === "member") {
-//       const currentUser = await User.findById(req.user._id).populate({
-//         path: "customRoles",
-//         populate: { path: "permissions" },
-//       });
-//       const hasDeletePermission = currentUser.customRoles.some(role =>
-//         role.permissions.some(perm => perm.name === "user:delete")
-//       );
-//       if (!hasDeletePermission || targetUser.role !== "member") {
-//         return res.status(403).json({ message: "Not authorized to delete this user" });
-//       }
-//     }
-
-//     // Delete avatar
-//     if (targetUser.avatar?.public_id) {
-//       await cloudinary.uploader.destroy(targetUser.avatar.public_id);
-//     }
-
-//     // Soft delete
-//     await User.findByIdAndUpdate(targetUser._id, { deleted: true });
-
-//     // Cascade soft delete for companyAdmin's members
-//     if (req.user.role === "admin" && targetUser.role === "companyAdmin") {
-//       await User.updateMany({ tenant: targetUser._id, role: "member" }, { deleted: true });
-//     }
-
-//     res.status(200).json({ message: "User deleted successfully" });
-//   } catch (err) {
-//     console.error("Delete Error:", err);
-//     next(err);
-//   }
-// };
 
 exports.deleteUser = async (req, res, next) => {
   try {
@@ -865,25 +764,30 @@ exports.deleteUser = async (req, res, next) => {
       await cloudinary.uploader.destroy(targetUser.avatar.public_id);
     }
 
+    let affectedUsers = [];
+
     // --- Hard Delete ---
     if (req.user.role === "admin" && targetUser.role === "companyAdmin") {
-      // 1) Delete members of this companyAdmin's tenant
+      // 1) Fetch members to return their IDs
+      affectedUsers = await User.find({ tenant: targetUser.tenant, role: "member" }).select("_id");
+      // 2) Delete members of this companyAdmin's tenant
       await User.deleteMany({ tenant: targetUser.tenant, role: "member" });
-
-      // 2) Delete departments of this tenant
+      // 3) Delete departments of this tenant
       await Department.deleteMany({ tenant: targetUser.tenant });
-
-      // 3) Delete tenant itself
+      // 4) Delete tenant itself
       await Tenant.findByIdAndDelete(targetUser.tenant);
-
-      // 4) Delete the companyAdmin
+      // 5) Delete the companyAdmin
       await User.findByIdAndDelete(targetUser._id);
     } else {
       // Normal user delete
       await User.findByIdAndDelete(targetUser._id);
     }
 
-    res.status(200).json({ message: "User deleted successfully" });
+    res.status(200).json({
+      message: "User deleted successfully",
+      deletedUserId: targetUser._id,
+      affectedUsers: affectedUsers.map(user => user._id), // Return IDs of deleted members
+    });
   } catch (err) {
     console.error("Delete Error:", err);
     next(err);
@@ -892,11 +796,32 @@ exports.deleteUser = async (req, res, next) => {
 
 exports.toggleActive = async (req, res) => {
   try {
-    const { id  } = req.params;
+    const { id } = req.params;
     const targetUser = await User.findById(id);
-
     if (!targetUser) {
       return res.status(404).json({ message: "User not found" });
+    }
+
+    // Tenant scoping
+    if (req.user.role !== "admin" && targetUser.tenant && req.tenantId !== targetUser.tenant.toString()) {
+      return res.status(403).json({ message: "Access denied: Wrong tenant" });
+    }
+
+    // Role-based checks
+    if (req.user.role === "companyAdmin" && targetUser.role !== "member") {
+      return res.status(403).json({ message: "CompanyAdmin can only toggle members" });
+    }
+    if (req.user.role === "member") {
+      const currentUser = await User.findById(req.user._id).populate({
+        path: "customRoles",
+        populate: { path: "permissions" },
+      });
+      const hasTogglePermission = currentUser.customRoles.some(role =>
+        role.permissions.some(perm => perm.name === "user:toggle")
+      );
+      if (!hasTogglePermission || targetUser.role !== "member") {
+        return res.status(403).json({ message: "Not authorized to toggle this user" });
+      }
     }
 
     // --- Toggle ---
@@ -911,27 +836,41 @@ exports.toggleActive = async (req, res) => {
 
     await targetUser.save();
 
-    let cascadeResult = null;
+    let affectedUsers = [];
 
     // ============ Cascade Logic ============
-    // 1. ADMIN deactivates COMPANY ADMIN → affect all tenant members
+    // 1. ADMIN toggles COMPANY ADMIN → affect all tenant members
     if (req.user.role === "admin" && targetUser.role === "companyAdmin") {
       if (!targetUser.isActive) {
-        // deactivate all active members of tenant
-        cascadeResult = await User.updateMany(
+        // Deactivate all active members of tenant
+        const result = await User.updateMany(
           { tenant: targetUser.tenant, role: "member", isActive: true },
           { $set: { isActive: false, deactivatedBy: "admin" } }
         );
+        // Fetch affected users
+        affectedUsers = await User.find({
+          tenant: targetUser.tenant,
+          role: "member",
+          isActive: false,
+          deactivatedBy: "admin",
+        }).select("_id isActive");
       } else {
-        // reactivate only those members that were deactivated by ADMIN (not companyAdmin)
-        cascadeResult = await User.updateMany(
+        // Reactivate only those members that were deactivated by ADMIN
+        const result = await User.updateMany(
           { tenant: targetUser.tenant, role: "member", deleted: false, deactivatedBy: "admin" },
           { $set: { isActive: true, deactivatedBy: null } }
         );
+        // Fetch affected users
+        affectedUsers = await User.find({
+          tenant: targetUser.tenant,
+          role: "member",
+          isActive: true,
+          deleted: false,
+        }).select("_id isActive");
       }
     }
 
-    // 2. COMPANY ADMIN deactivates a MEMBER
+    // 2. COMPANY ADMIN toggles a MEMBER
     if (req.user.role === "companyAdmin" && targetUser.role === "member") {
       if (!targetUser.isActive) {
         targetUser.deactivatedBy = "companyAdmin";
@@ -943,8 +882,8 @@ exports.toggleActive = async (req, res) => {
 
     res.json({
       message: `User ${targetUser.isActive ? "activated" : "deactivated"} successfully`,
-      user: targetUser,
-      cascade: cascadeResult,
+      updatedUser: { _id: targetUser._id, isActive: targetUser.isActive },
+      affectedUsers: affectedUsers.map(user => ({ _id: user._id, isActive: user.isActive })), // Return IDs and isActive
     });
   } catch (error) {
     console.error("toggleActive error:", error);
@@ -1034,17 +973,6 @@ exports.getUserById = async (req, res, next) => {
       .populate("customRoles department");
 
     if (!user) return res.status(404).json({ message: "User not found" });
-
-    // console.log('getUserById: User data', {
-    //   userId: req.params.id,
-    //   departmentId: user.department?._id?.toString(),
-    //   departmentName: user.department?.name,
-    //   tenantId: user.tenant?._id?.toString(),
-    //   tenantDepartments: user.tenant?.departments?.map(d => ({
-    //     id: d._id?.toString(),
-    //     name: d.name,
-    //   })),
-    // });
 
     if (req.user.role !== "admin" && user.tenant && req.tenantId !== user.tenant._id.toString()) {
       return res.status(403).json({ message: "Access denied: Wrong tenant" });
