@@ -31,11 +31,11 @@ const {
 } = require("../controllers/roleController");
 
 // Role management (admin and companyAdmin only)
-router.post("/", protect, allowRoles("admin", "companyAdmin"), createRole);
-router.get("/", protect, allowRoles("admin", "companyAdmin"), getRoles);
-router.post("/assign/:userId", protect, allowRoles("admin", "companyAdmin"), assignRoleToUser);
-router.post("/remove/:userId", protect, allowRoles("admin", "companyAdmin"), removeRoleFromUser);
-router.put("/:roleId", protect, allowRoles("admin", "companyAdmin"), updateRole);
-router.delete("/:roleId", protect, allowRoles("admin", "companyAdmin"), deleteRole);
+router.post("/", protect, allowRoles("companyAdmin"), createRole);
+router.get("/", protect, allowRoles("companyAdmin"), getRoles);
+router.post("/assign/:userId", protect, allowRoles("companyAdmin"), assignRoleToUser);
+router.post("/remove/:userId", protect, allowRoles("companyAdmin"), removeRoleFromUser);
+router.put("/:roleId", protect, allowRoles("companyAdmin"), updateRole);
+router.delete("/:roleId", protect, allowRoles("companyAdmin"), deleteRole);
 
 module.exports = router;
