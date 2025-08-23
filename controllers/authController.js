@@ -733,6 +733,117 @@ exports.resendOtp = async (req, res, next) => {
 //     }
 // };
 
+// exports.loginUser = async (req, res, next) => {
+//     try {
+//         const { error } = loginSchema.validate(req.body);
+//         if (error) return res.status(400).json({ message: error.details[0].message });
+
+//         const { email, password } = req.body;
+
+//         const user = await User.findOne({ email }).select('+password').populate('tenant customRoles');
+//         if (!user) return res.status(404).json({ message: 'User not found' });
+
+//         const isMatch = await bcrypt.compare(password, user.password);
+//         if (!isMatch) return res.status(401).json({ message: 'Invalid password' });
+
+//         if (!user.isVerified) {
+//             await OTP.deleteMany({ email, purpose: 'verify' });
+
+//             const otpCode = generateOTP();
+//             const expiresAt = moment().add(process.env.OTP_EXPIRE_MINUTES, 'minutes').toDate();
+//             await OTP.create({ email, code: otpCode, expiresAt, purpose: 'verify' });
+
+//             const baseURL = user.role === 'admin' || user.role === 'companyAdmin'
+//                 ? process.env.FRONTEND_URL
+//                 : process.env.PUBLIC_FRONTEND_URL;
+//             const link = `${baseURL}/verify-email?code=${otpCode}&email=${email}`;
+
+//             await sendEmail({
+//                 to: email,
+//                 subject: 'Verify Your Email',
+//                 html: `
+//             <p>Hello ${user.name},</p>
+//             <p>Please verify your email before logging in.</p>
+//             <p>Click: <a href="${link}">${link}</a></p>
+//             <p>This link expires in ${process.env.OTP_EXPIRE_MINUTES} minute(s).</p>
+//           `,
+//             });
+
+//             return res.status(401).json({
+//                 message: 'Email not verified. A verification link has been sent to your email.',
+//             });
+//         }
+
+//         // console.log('refreshToken secret:', process.env.REFRESH_TOKEN_SECRET);
+
+//         const accessToken = generateToken(
+//             {
+//                 _id: user._id.toString(),
+//                 role: user.role,
+//                 tenant: user.tenant ? user.tenant._id.toString() : null, // Store tenant as string
+//                 customRoles: user.customRoles || [],
+//             },
+//             'access'
+//         );
+//         const refreshToken = generateToken(
+//             {
+//                 _id: user._id.toString(),
+//                 role: user.role,
+//             },
+//             'refresh'
+//         );
+
+//         res.cookie('refreshToken', refreshToken, {
+//             httpOnly: true,
+//             secure: process.env.NODE_ENV === 'production',
+//             sameSite: process.env.NODE_ENV === 'production' ? 'None' : 'Lax',
+//             maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+//         });
+
+//         res.cookie('accessToken', accessToken, {
+//             httpOnly: true,
+//             secure: process.env.NODE_ENV === 'production',
+//             sameSite: process.env.NODE_ENV === 'production' ? 'None' : 'Lax',
+//             maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+//         });
+
+//         const safeUser = {
+//             _id: user._id,
+//             name: user.name,
+//             email: user.email,
+//             role: user.role,
+//             customRoles: user.customRoles,
+//             authProvider: user.authProvider,
+//             bio: user.bio,
+//             phone: user.phone,
+//             isActive: user.isActive,
+//             isVerified: user.isVerified,
+//             surveyStats: user.surveyStats,
+//             tenant: user.tenant, // Return tenant as string
+//             createdAt: user.createdAt,
+//             updatedAt: user.updatedAt,
+//         };
+
+//         // console.log('login: Token generated', {
+//         //     accessTokenPayload: {
+//         //         _id: user._id.toString(),
+//         //         role: user.role,
+//         //         tenant: user.tenant ? user.tenant._id.toString() : null,
+//         //         customRoles: user.customRoles || [],
+//         //     },
+//         //     safeUser
+//         // });
+
+//         res.status(200).json({
+//             accessToken,
+//             user: safeUser,
+//         });
+//     } catch (err) {
+//         console.error('Login Error:', err);
+//         next(err);
+//     }
+// }
+
 exports.loginUser = async (req, res, next) => {
     try {
         const { error } = loginSchema.validate(req.body);
@@ -740,109 +851,119 @@ exports.loginUser = async (req, res, next) => {
 
         const { email, password } = req.body;
 
-        const user = await User.findOne({ email }).select('+password').populate('tenant customRoles');
-        if (!user) return res.status(404).json({ message: 'User not found' });
+        // === find user with nested populate ===
+        const user = await User.findOne({ email })
+            .select("+password")
+            .populate([
+                { path: "tenant", select: "name domain isActive createdAt" },
+                {
+                    path: "customRoles",
+                    select: "name permissions createdAt",
+                    populate: {
+                        path: "permissions",
+                        model: "Permission",
+                        select: "name description group createdAt" // <-- full permission detail
+                    }
+                }
+            ]);
 
+        if (!user) return res.status(404).json({ message: "User not found" });
+
+        // === check password ===
         const isMatch = await bcrypt.compare(password, user.password);
-        if (!isMatch) return res.status(401).json({ message: 'Invalid password' });
+        if (!isMatch) return res.status(401).json({ message: "Invalid password" });
 
+        // === verify email check ===
         if (!user.isVerified) {
-            await OTP.deleteMany({ email, purpose: 'verify' });
+            await OTP.deleteMany({ email, purpose: "verify" });
 
             const otpCode = generateOTP();
-            const expiresAt = moment().add(process.env.OTP_EXPIRE_MINUTES, 'minutes').toDate();
-            await OTP.create({ email, code: otpCode, expiresAt, purpose: 'verify' });
+            const expiresAt = moment().add(process.env.OTP_EXPIRE_MINUTES, "minutes").toDate();
+            await OTP.create({ email, code: otpCode, expiresAt, purpose: "verify" });
 
-            const baseURL = user.role === 'admin' || user.role === 'companyAdmin'
-                ? process.env.FRONTEND_URL
-                : process.env.PUBLIC_FRONTEND_URL;
+            const baseURL =
+                user.role === "admin" || user.role === "companyAdmin"
+                    ? process.env.FRONTEND_URL
+                    : process.env.PUBLIC_FRONTEND_URL;
             const link = `${baseURL}/verify-email?code=${otpCode}&email=${email}`;
 
             await sendEmail({
                 to: email,
-                subject: 'Verify Your Email',
+                subject: "Verify Your Email",
                 html: `
-            <p>Hello ${user.name},</p>
-            <p>Please verify your email before logging in.</p>
-            <p>Click: <a href="${link}">${link}</a></p>
-            <p>This link expires in ${process.env.OTP_EXPIRE_MINUTES} minute(s).</p>
-          `,
+                  <p>Hello ${user.name},</p>
+                  <p>Please verify your email before logging in.</p>
+                  <p>Click: <a href="${link}">${link}</a></p>
+                  <p>This link expires in ${process.env.OTP_EXPIRE_MINUTES} minute(s).</p>
+                `,
             });
 
             return res.status(401).json({
-                message: 'Email not verified. A verification link has been sent to your email.',
+                message: "Email not verified. A verification link has been sent to your email.",
             });
         }
 
-        // console.log('refreshToken secret:', process.env.REFRESH_TOKEN_SECRET);
-
+        // === generate tokens ===
         const accessToken = generateToken(
             {
                 _id: user._id.toString(),
                 role: user.role,
-                tenant: user.tenant ? user.tenant._id.toString() : null, // Store tenant as string
-                customRoles: user.customRoles || [],
+                tenant: user.tenant ? user.tenant._id.toString() : null,
+                customRoles: user.customRoles.map(r => r._id.toString())
             },
-            'access'
+            "access"
         );
+
         const refreshToken = generateToken(
             {
                 _id: user._id.toString(),
                 role: user.role,
             },
-            'refresh'
+            "refresh"
         );
 
-        res.cookie('refreshToken', refreshToken, {
+        // === set cookies ===
+        res.cookie("refreshToken", refreshToken, {
             httpOnly: true,
-            secure: process.env.NODE_ENV === 'production',
-            sameSite: process.env.NODE_ENV === 'production' ? 'None' : 'Lax',
-            maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+            secure: process.env.NODE_ENV === "production",
+            sameSite: process.env.NODE_ENV === "production" ? "None" : "Lax",
+            maxAge: 7 * 24 * 60 * 60 * 1000,
         });
 
-        res.cookie('accessToken', accessToken, {
+        res.cookie("accessToken", accessToken, {
             httpOnly: true,
-            secure: process.env.NODE_ENV === 'production',
-            sameSite: process.env.NODE_ENV === 'production' ? 'None' : 'Lax',
-            maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+            secure: process.env.NODE_ENV === "production",
+            sameSite: process.env.NODE_ENV === "production" ? "None" : "Lax",
+            maxAge: 7 * 24 * 60 * 60 * 1000,
         });
 
+        // === safeUser with fully populated data ===
         const safeUser = {
             _id: user._id,
             name: user.name,
             email: user.email,
             role: user.role,
-            customRoles: user.customRoles,
+            customRoles: user.customRoles, // now includes full permissions[]
             authProvider: user.authProvider,
             bio: user.bio,
             phone: user.phone,
             isActive: user.isActive,
             isVerified: user.isVerified,
             surveyStats: user.surveyStats,
-            tenant: user.tenant, // Return tenant as string
+            tenant: user.tenant, // populated object {name, domain, ...}
             createdAt: user.createdAt,
             updatedAt: user.updatedAt,
         };
-
-        // console.log('login: Token generated', {
-        //     accessTokenPayload: {
-        //         _id: user._id.toString(),
-        //         role: user.role,
-        //         tenant: user.tenant ? user.tenant._id.toString() : null,
-        //         customRoles: user.customRoles || [],
-        //     },
-        //     safeUser
-        // });
 
         res.status(200).json({
             accessToken,
             user: safeUser,
         });
     } catch (err) {
-        console.error('Login Error:', err);
+        console.error("❌ Login Error:", err);
         next(err);
     }
-}
+};
 
 exports.forgotPassword = async (req, res, next) => {
     try {
@@ -1032,30 +1153,30 @@ exports.verifyResetCode = async (req, res) => {
 // };
 
 exports.getMe = async (req, res, next) => {
-  try {
-    const userId = req.user._id;
-    // console.log('getMe: Fetching user', { userId, cookies: req.cookies, user: req.user.toJSON() });
+    try {
+        const userId = req.user._id;
+        // console.log('getMe: Fetching user', { userId, cookies: req.cookies, user: req.user.toJSON() });
 
-    const user = await User.findById(userId)
-      .select('-password')
-      .populate({
-        path: 'tenant',
-        populate: { path: 'departments', model: 'Department' },
-      })
-      .populate('department')
-      .populate('customRoles');
+        const user = await User.findById(userId)
+            .select('-password')
+            .populate({
+                path: 'tenant',
+                populate: { path: 'departments', model: 'Department' },
+            })
+            .populate('department')
+            .populate('customRoles');
 
-    if (!user) {
-    //   console.log('getMe: User not found', { userId });
-      return res.status(404).json({ message: 'User not found' });
+        if (!user) {
+            //   console.log('getMe: User not found', { userId });
+            return res.status(404).json({ message: 'User not found' });
+        }
+
+        // console.log('getMe: User fetched', { user: user.toJSON() });
+        return res.status(200).json({ success: true, user });
+    } catch (err) {
+        console.error('getMe error:', { message: err.message, stack: err.stack });
+        return res.status(500).json({ message: 'Server error' });
     }
-
-    // console.log('getMe: User fetched', { user: user.toJSON() });
-    return res.status(200).json({ success: true, user });
-  } catch (err) {
-    console.error('getMe error:', { message: err.message, stack: err.stack });
-    return res.status(500).json({ message: 'Server error' });
-  }
 };
 
 exports.logoutUser = async (req, res) => {

@@ -19,6 +19,10 @@ exports.allowRoles = (...roles) => (req, res, next) => {
   //   allowedRoles: roles,
   //   userId: req.user._id,
   // });
+  if (req.user.role === "member") {
+    // Member ko controller tak jane do, wahan permission check hoga
+    return next();
+  }
 
   if (!roles.includes(req.user.role)) {
     // console.log('allowRoles: Role not allowed', { userRole: req.user.role, allowedRoles: roles });
