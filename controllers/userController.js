@@ -541,139 +541,259 @@ const updateMeSchema = Joi.object({
   }).optional(),
 });
 
+// exports.createUser = async (req, res) => {
+//   try {
+//     // Validate request
+//     const { error } = createUserSchema.validate(req.body);
+//     if (error) {
+//       return res.status(400).json({ message: error.details[0].message });
+//     }
+
+//     const { name, email, password, role, tenant, department, tenantName } = req.body;
+//     const currentUser = req.user;
+//     const existingUser = await User.findOne({ email });
+//     if (existingUser) {
+//       return res.status(400).json({ message: 'User already exists with this email.' });
+//     }
+//     if (currentUser.role === 'admin' && !['companyAdmin', 'user'].includes(role)) {
+//       return res.status(403).json({ message: 'Admin can only create CompanyAdmin or User.' });
+//     }
+//     if (currentUser.role === 'companyAdmin' && role !== 'member') {
+//       return res.status(403).json({ message: 'CompanyAdmin can only create Member role.' });
+//     }
+
+//      // --- Member custom role restrictions ---
+//      if (currentUser.role === "member") {
+//       // populate user with customRole and permissions
+//       const populatedUser = await User.findById(currentUser._id).populate({
+//         path: "customRole",
+//         populate: { path: "permissions" }
+//       });
+
+//       const hasPermission = populatedUser?.customRole?.permissions.some(
+//         (p) => p.name === "user:create"
+//       );
+
+//       if (!hasPermission) {
+//         return res.status(403).json({ message: "Access denied: Permission 'user:create' required" });
+//       }
+//     }
+
+//     // Tenant validation
+//     let tenantId = tenant;
+//     if (currentUser.role === 'companyAdmin' && role === 'member') {
+//       if (!currentUser.tenant) {
+//         return res.status(403).json({ message: 'Access denied: No tenant associated with this user' });
+//       }
+//       const userTenantId = currentUser.tenant._id ? currentUser.tenant._id.toString() : currentUser.tenant;
+//       tenantId = tenant || userTenantId;
+//       if (tenant && tenant !== userTenantId) {
+//         console.log('Tenant mismatch');
+//         return res.status(403).json({ message: 'Access denied: Invalid tenant' });
+//       }
+//     }
+
+//     // Validate department belongs to tenant
+//     if (role === 'member' && department) {
+//       if (!mongoose.Types.ObjectId.isValid(tenantId)) {
+//         return res.status(400).json({ message: 'Invalid tenant ID' });
+//       }
+//       const tenantData = await Tenant.findById(tenantId).populate('departments');
+//       if (!tenantData || !tenantData.departments.some((d) => d._id.toString() === department)) {
+//         return res.status(400).json({ message: 'Invalid department for this tenant' });
+//       }
+//     }
+
+//     // Hash password
+//     const hashedPassword = await bcrypt.hash(password, 10);
+
+//     let newUser;
+
+//     if (role === 'companyAdmin') {
+//       const tempUser = new User({
+//         name,
+//         email,
+//         password: hashedPassword,
+//         role,
+//         tenant: null,
+//         department: null,
+//         isVerified: false,
+//         createdBy: currentUser._id,
+//       });
+
+//       await tempUser.save({ validateBeforeSave: false });
+
+//       const newTenant = await Tenant.create({
+//         name: tenantName && tenantName.trim() !== '' ? tenantName : `${name}'s Company`,
+//         admin: tempUser._id,
+//         createdBy: currentUser._id,
+//       });
+
+//       tempUser.tenant = newTenant._id;
+//       await tempUser.save();
+
+//       newUser = tempUser;
+//       tenantId = newTenant._id;
+
+//     } else {
+//       newUser = await User.create({
+//         name,
+//         email,
+//         password: hashedPassword,
+//         role,
+//         tenant: tenantId,
+//         department: role === 'member' ? department : null,
+//         isVerified: false,
+//         createdBy: currentUser._id,
+//       });
+//     }
+
+//     // OTP
+//     const verificationCode = generateOTP();
+//     const expiresAt = moment().add(process.env.OTP_EXPIRE_MINUTES || 15, 'minutes').toDate();
+//     await OTP.create({ email, code: verificationCode, purpose: 'verify', expiresAt });
+//     console.log('OTP generated:', verificationCode);
+
+//     const baseURLs = getBaseURL();
+//     const baseURL = role === 'user' ? baseURLs.public : baseURLs.admin;
+//     const verificationLink = `${baseURL}/verify-email?code=${verificationCode}&email=${encodeURIComponent(email)}`;
+
+//     // Email HTML
+//     const emailHTML = `
+//       <p>Hello ${name},</p>
+//       <p>Your account has been successfully created.</p>
+//       <p><strong>Login Email:</strong> ${email}</p>
+//       <p><strong>Temporary Password:</strong> ${password}</p>
+//       <p>Please verify your email by clicking the link below:</p>
+//       <p><a href="${verificationLink}" target="_blank">${verificationLink}</a></p>
+//       <p>This code will expire in ${process.env.OTP_EXPIRE_MINUTES} minute(s).</p>
+//       <br/>
+//       <p>Regards,<br/>Team</p>
+//     `;
+//     await sendEmail({
+//       to: email,
+//       subject: 'Verify your email - RatePro',
+//       html: emailHTML,
+//     });
+
+//     res.status(201).json({
+//       message: 'User created successfully. Verification email sent.',
+//       user: {
+//         id: newUser._id,
+//         email: newUser.email,
+//         role: newUser.role,
+//         tenant: newUser.tenant,
+//         isVerified: newUser.isVerified,
+//       },
+//     });
+//   } catch (err) {
+//     console.error('CreateUser error:', err);
+//     res.status(500).json({ message: 'Internal Server Error' });
+//   }
+// };
+
 exports.createUser = async (req, res) => {
   try {
-    // Validate request
-    const { error } = createUserSchema.validate(req.body);
-    if (error) {
-      return res.status(400).json({ message: error.details[0].message });
+    const currentUser = req.user; // Logged-in user
+    const { role } = req.body;
+
+    // --- SuperAdmin restrictions ---
+    if (currentUser.role === "superAdmin" && !["admin", "companyAdmin"].includes(role)) {
+      return res.status(403).json({ message: "Access denied: Role not authorized" });
     }
 
-    const { name, email, password, role, tenant, department, tenantName } = req.body;
-    const currentUser = req.user;
-    const existingUser = await User.findOne({ email });
-    if (existingUser) {
-      return res.status(400).json({ message: 'User already exists with this email.' });
-    }
-    if (currentUser.role === 'admin' && !['companyAdmin', 'user'].includes(role)) {
-      return res.status(403).json({ message: 'Admin can only create CompanyAdmin or User.' });
-    }
-    if (currentUser.role === 'companyAdmin' && role !== 'member') {
-      return res.status(403).json({ message: 'CompanyAdmin can only create Member role.' });
+    // --- Admin restrictions ---
+    if (currentUser.role === "admin" && !["companyAdmin", "user"].includes(role)) {
+      return res.status(403).json({ message: "Access denied: Role not authorized" });
     }
 
-    // Tenant validation
-    let tenantId = tenant;
-    if (currentUser.role === 'companyAdmin' && role === 'member') {
-      if (!currentUser.tenant) {
-        return res.status(403).json({ message: 'Access denied: No tenant associated with this user' });
-      }
-      const userTenantId = currentUser.tenant._id ? currentUser.tenant._id.toString() : currentUser.tenant;
-      tenantId = tenant || userTenantId;
-      if (tenant && tenant !== userTenantId) {
-        console.log('Tenant mismatch');
-        return res.status(403).json({ message: 'Access denied: Invalid tenant' });
-      }
+    // --- CompanyAdmin restrictions ---
+    if (currentUser.role === "companyAdmin" && role !== "member") {
+      return res.status(403).json({ message: "Access denied: Role not authorized" });
     }
 
-    // Validate department belongs to tenant
-    if (role === 'member' && department) {
-      if (!mongoose.Types.ObjectId.isValid(tenantId)) {
-        return res.status(400).json({ message: 'Invalid tenant ID' });
-      }
-      const tenantData = await Tenant.findById(tenantId).populate('departments');
-      if (!tenantData || !tenantData.departments.some((d) => d._id.toString() === department)) {
-        return res.status(400).json({ message: 'Invalid department for this tenant' });
-      }
-    }
-
-    // Hash password
-    const hashedPassword = await bcrypt.hash(password, 10);
-
-    let newUser;
-
-    if (role === 'companyAdmin') {
-      const tempUser = new User({
-        name,
-        email,
-        password: hashedPassword,
-        role,
-        tenant: null,
-        department: null,
-        isVerified: false,
-        createdBy: currentUser._id,
+    // --- Member custom role restrictions ---
+    if (currentUser.role === "member") {
+      // Populate user with customRoles and permissions
+      const populatedUser = await User.findById(currentUser._id).populate({
+        path: "customRoles", // plural
+        populate: { path: "permissions" }
       });
 
-      await tempUser.save({ validateBeforeSave: false });
+      // Check if any custom role has the 'user:create' permission
+      const hasPermission = populatedUser?.customRoles?.some((role) =>
+        role.permissions.some((p) => p.name === "user:create")
+      );
 
-      const newTenant = await Tenant.create({
-        name: tenantName && tenantName.trim() !== '' ? tenantName : `${name}'s Company`,
-        admin: tempUser._id,
-        createdBy: currentUser._id,
-      });
-
-      tempUser.tenant = newTenant._id;
-      await tempUser.save();
-
-      newUser = tempUser;
-      tenantId = newTenant._id;
-
-    } else {
-      newUser = await User.create({
-        name,
-        email,
-        password: hashedPassword,
-        role,
-        tenant: tenantId,
-        department: role === 'member' ? department : null,
-        isVerified: false,
-        createdBy: currentUser._id,
-      });
+      if (!hasPermission) {
+        return res.status(403).json({ message: "Access denied: Permission 'user:create' required" });
+      }
     }
 
-    // OTP
-    const verificationCode = generateOTP();
-    const expiresAt = moment().add(process.env.OTP_EXPIRE_MINUTES || 15, 'minutes').toDate();
-    await OTP.create({ email, code: verificationCode, purpose: 'verify', expiresAt });
-    console.log('OTP generated:', verificationCode);
+    // ==== Agar yahan tak aagaya to user create kar do ====
+    const newUser = new User(req.body);
+    await newUser.save();
 
-    const baseURLs = getBaseURL();
-    const baseURL = role === 'user' ? baseURLs.public : baseURLs.admin;
-    const verificationLink = `${baseURL}/verify-email?code=${verificationCode}&email=${encodeURIComponent(email)}`;
-
-    // Email HTML
-    const emailHTML = `
-      <p>Hello ${name},</p>
-      <p>Your account has been successfully created.</p>
-      <p><strong>Login Email:</strong> ${email}</p>
-      <p><strong>Temporary Password:</strong> ${password}</p>
-      <p>Please verify your email by clicking the link below:</p>
-      <p><a href="${verificationLink}" target="_blank">${verificationLink}</a></p>
-      <p>This code will expire in ${process.env.OTP_EXPIRE_MINUTES} minute(s).</p>
-      <br/>
-      <p>Regards,<br/>Team</p>
-    `;
-    await sendEmail({
-      to: email,
-      subject: 'Verify your email - RatePro',
-      html: emailHTML,
-    });
-
-    res.status(201).json({
-      message: 'User created successfully. Verification email sent.',
-      user: {
-        id: newUser._id,
-        email: newUser.email,
-        role: newUser.role,
-        tenant: newUser.tenant,
-        isVerified: newUser.isVerified,
-      },
-    });
+    res.status(201).json({ message: "User created successfully", user: newUser });
   } catch (err) {
-    console.error('CreateUser error:', err);
-    res.status(500).json({ message: 'Internal Server Error' });
+    console.error("❌ Create user error:", err);
+    res.status(500).json({ message: "Server error", error: err.message });
   }
 };
+
+// exports.updateUser = async (req, res, next) => {
+//   try {
+//     const { id } = req.params;
+//     let updates = { ...req.body };
+
+//     const user = await User.findById(id);
+//     if (!user) {
+//       return res.status(404).json({ message: "User not found" });
+//     }
+
+//     // ----- ROLE BASED FIELD CONTROL -----
+//     if (req.user.role === "admin") {
+//       const allowedFields = ["name", "role", "isActive", "companyName"];
+//       Object.keys(updates).forEach((key) => {
+//         if (!allowedFields.includes(key)) delete updates[key];
+//       });
+//     } else if (req.user.role === "companyAdmin") {
+//       const allowedFields = ["name", "isActive", "department"];
+//       Object.keys(updates).forEach((key) => {
+//         if (!allowedFields.includes(key)) delete updates[key];
+//       });
+//     } else if (req.user.role === "member") {
+//       const allowedFields = ["name", "isActive"];
+//       Object.keys(updates).forEach((key) => {
+//         if (!allowedFields.includes(key)) delete updates[key];
+//       });
+//     }
+
+//     // ----- ISACTIVE LOGIC (direct update allowed) -----
+//     if (typeof updates.isActive !== "undefined") {
+//       if (!updates.isActive) {
+//         updates.deactivatedBy = req.user.role; // jisne deactivate kiya
+//       } else {
+//         updates.deactivatedBy = null; // reactivate hone pe clear
+//       }
+//     }
+
+//     // ----- UPDATE USER -----
+//     const updatedUser = await User.findByIdAndUpdate(id, updates, {
+//       new: true,
+//       runValidators: true,
+//     }).select("-password");
+
+//     res.status(200).json({
+//       status: "success",
+//       message: "User updated successfully",
+//       data: updatedUser,
+//     });
+//   } catch (error) {
+//     console.error("❌ UpdateUser Error:", error.message);
+//     next(error);
+//   }
+// };
 
 exports.updateUser = async (req, res, next) => {
   try {
@@ -683,6 +803,29 @@ exports.updateUser = async (req, res, next) => {
     const user = await User.findById(id);
     if (!user) {
       return res.status(404).json({ message: "User not found" });
+    }
+
+    // --- Member custom role restrictions ---
+    if (req.user.role === "member") {
+      // Populate user with customRoles and permissions
+      const populatedUser = await User.findById(req.user._id).populate({
+        path: "customRoles", // plural
+        populate: { path: "permissions" }
+      });
+
+      // Check if any custom role has the 'user:update' permission
+      const hasPermission = populatedUser?.customRoles?.some((role) =>
+        role.permissions.some((p) => p.name === "user:update")
+      );
+
+      if (!hasPermission) {
+        return res.status(403).json({ message: "Access denied: Permission 'user:update' required" });
+      }
+
+      // Optional: Tenant validation for member role
+      if (user.tenant._id.toString() !== req.user.tenant._id.toString()) {
+        return res.status(403).json({ message: "Access denied: Cannot update users from a different tenant" });
+      }
     }
 
     // ----- ROLE BASED FIELD CONTROL -----
@@ -786,6 +929,7 @@ exports.deleteUser = async (req, res, next) => {
     res.status(200).json({
       message: "User deleted successfully",
       deletedUserId: targetUser._id,
+      deletedUserRole: targetUser.role,
       affectedUsers: affectedUsers.map(user => user._id), // Return IDs of deleted members
     });
   } catch (err) {
@@ -922,20 +1066,24 @@ exports.getAllUsers = async (req, res, next) => {
       query.isActive = false;
     }
 
-    // 🏢 Tenant scoping
+    // 🏢 Tenant scoping and role restrictions
     if (req.user.role.toLowerCase() !== "admin") {
       if (req.tenantId) {
         query.tenant = req.tenantId;
         // Non-admins should not see admins
         query.role = { $ne: "admin" };
-        console.log("🏢 Tenant scoping applied for non-admin:", req.tenantId);
+        // Members should not see companyAdmins
+        if (req.user.role.toLowerCase() === "member") {
+          query.role = { $nin: ["admin", "companyAdmin"] };
+        }
+        // console.log("🏢 Tenant scoping applied for non-admin:", req.tenantId, "Role:", req.user.role);
       } else {
-        console.log("🚫 Access denied: No tenant for non-admin user");
+        // console.log("🚫 Access denied: No tenant for non-admin user");
         return res.status(403).json({
           message: "Access denied: No tenant associated with this user",
         });
       }
-    } 
+    }
 
     const total = await User.countDocuments(query);
 
@@ -958,6 +1106,74 @@ exports.getAllUsers = async (req, res, next) => {
     next(err);
   }
 };
+
+// exports.getAllUsers = async (req, res, next) => {
+//   try {
+//     const { error, value } = getAllUsersSchema.validate(req.query);
+//     if (error) {
+//       return res.status(400).json({ message: error.details[0].message });
+//     }
+
+//     const { page, limit, search, sort, role, active } = value;
+
+//     const query = { deleted: false };
+
+//     // 🔍 Search
+//     if (search) {
+//       query.$or = [
+//         { name: { $regex: search, $options: "i" } },
+//         { email: { $regex: search, $options: "i" } },
+//       ];
+//     }
+
+//     // 🎭 Role filter
+//     if (role) {
+//       query.role = role;
+//     }
+
+//     // ✅ Active/Inactive filter
+//     if (active === "true") {
+//       query.isActive = true;
+//     } else if (active === "false") {
+//       query.isActive = false;
+//     }
+
+//     // 🏢 Tenant scoping
+//     if (req.user.role.toLowerCase() !== "admin") {
+//       if (req.tenantId) {
+//         query.tenant = req.tenantId;
+//         // Non-admins should not see admins
+//         query.role = { $ne: "admin" };
+//         console.log("🏢 Tenant scoping applied for non-admin:", req.tenantId);
+//       } else {
+//         console.log("🚫 Access denied: No tenant for non-admin user");
+//         return res.status(403).json({
+//           message: "Access denied: No tenant associated with this user",
+//         });
+//       }
+//     } 
+
+//     const total = await User.countDocuments(query);
+
+//     const users = await User.find(query)
+//       .select("-password")
+//       .populate("tenant customRoles department")
+//       .sort({ [sort]: -1 })
+//       .skip((page - 1) * limit)
+//       .limit(parseInt(limit));
+
+//     res.status(200).json({
+//       total,
+//       totalPages: Math.ceil(total / limit),
+//       page: parseInt(page),
+//       limit: parseInt(limit),
+//       users,
+//     });
+//   } catch (err) {
+//     console.error("❌ Get All Users Error:", err);
+//     next(err);
+//   }
+// };
 
 exports.getUserById = async (req, res, next) => {
   try {

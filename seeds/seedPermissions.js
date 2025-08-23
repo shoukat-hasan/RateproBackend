@@ -34,7 +34,7 @@ const seedPermissions = async () => {
                 );
             }
         }
-        console.log("Permissions seeded successfully");
+        // console.log("Permissions seeded successfully");
     } catch (err) {
         console.error("Error seeding permissions:", err);
         throw err;

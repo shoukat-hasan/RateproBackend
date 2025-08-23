@@ -97,10 +97,10 @@ exports.getTenant = async (req, res) => {
   try {
     const tenant = await Tenant.findById(req.params.id).populate('departments');
     if (!tenant) {
-      console.log('getTenant: Tenant not found', { tenantId: req.params.id });
+      // console.log('getTenant: Tenant not found', { tenantId: req.params.id });
       return res.status(404).json({ message: 'Tenant not found' });
     }
-    console.log('getTenant: Tenant fetched', { tenant: tenant.toJSON() });
+    // console.log('getTenant: Tenant fetched', { tenant: tenant.toJSON() });
     res.status(200).json({ success: true, tenant });
   } catch (err) {
     console.error('getTenant error:', { message: err.message, stack: err.stack });

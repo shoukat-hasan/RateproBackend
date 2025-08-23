@@ -341,7 +341,7 @@ const userSchema = new mongoose.Schema({
     type: Boolean,
     default: true,
   },
-  deactivatedBy: { type: String, enum: ["admin", "companyAdmin", null], default: null },
+  deactivatedBy: { type: String, enum: ["admin", "companyAdmin", "member", null], default: null },
   // Auth Tokens
   resetPasswordToken: String,
   resetPasswordExpire: Date,
