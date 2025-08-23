@@ -1,16 +1,12 @@
+const mongoose = require("mongoose");
 const Tenant = require('../models/Tenant');
+const User = require('../models/User');
 const Department = require('../models/Department');
 
 exports.updateTenant = async (req, res, next) => {
   try {
     const { tenantId } = req.params;
     const { name, address, contactEmail, contactPhone, website, totalEmployees, departments } = req.body;
-
-    console.log('updateTenant: Request aaya', {
-      tenantId,
-      user: { id: req.user._id, role: req.user.role, tenant: req.user.tenant },
-      payload: req.body,
-    });
 
     // Validate inputs
     if (!name) {
@@ -25,17 +21,15 @@ exports.updateTenant = async (req, res, next) => {
 
     // Check authorization
     if (req.user.role !== 'companyAdmin') {
-      console.log('updateTenant: Not companyAdmin', { userId: req.user._id, role: req.user.role });
       return res.status(403).json({ message: 'User is not a companyAdmin' });
     }
     if (!req.user.tenant || req.user.tenant._id.toString() !== tenantId) {
-      console.log('updateTenant: Tenant mismatch', { userTenantId: req.user.tenant._id.toString(), requestTenant });
       return res.status(403).json({ message: 'Unauthorized to update this tenant' });
     }
 
     // Validate and update/create departments
     const departmentDocs = await Promise.all(
-      departments.map(async (dept) => {
+      (departments || []).map(async (dept) => {
         if (!dept.name) {
           throw new Error('Department name is required');
         }
@@ -81,11 +75,14 @@ exports.updateTenant = async (req, res, next) => {
     ).populate('departments');
 
     if (!updatedTenant) {
-      console.log('updateTenant: Tenant nahi mila', { tenantId });
       return res.status(404).json({ message: 'Tenant not found' });
     }
 
-    console.log('updateTenant: Tenant updated', { tenant: updatedTenant.toJSON() });
+    // ✅ Flag update in User
+    await User.findByIdAndUpdate(req.user._id, {
+      companyProfileUpdated: true,
+    });
+
     return res.status(200).json({ success: true, tenant: updatedTenant });
   } catch (err) {
     console.error('updateTenant error:', { message: err.message, stack: err.stack });
