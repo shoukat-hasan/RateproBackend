@@ -60,7 +60,6 @@ const verifyResetCodeSchema = Joi.object({
     code: Joi.string().length(6).required(),
 });
 
-
 const resetPasswordSchema = Joi.object({
     email: Joi.string().email().required(),
     code: Joi.string().length(6).required(),
@@ -134,21 +133,21 @@ exports.verifyEmailLink = async (req, res, next) => {
 
         // Validate query
         const { error } = verifyEmailSchema.validate({ code, email });
-        if (error) return res.redirect(`${process.env.PUBLIC_FRONTEND_URL}/login?message=invalid-otp`);
+        if (error) return res.redirect(`${process.env.RATEPRO_URL}/login?message=invalid-otp`);
 
         const otp = await OTP.findOne({ email, code, purpose: "verify" });
-        if (!otp) return res.redirect(`${process.env.PUBLIC_FRONTEND_URL}/login?message=invalid-otp`);
+        if (!otp) return res.redirect(`${process.env.RATEPRO_URL}/login?message=invalid-otp`);
 
         if (otp.expiresAt < new Date()) {
-            return res.redirect(`${process.env.PUBLIC_FRONTEND_URL}/login?message=otp-expired`);
+            return res.redirect(`${process.env.RATEPRO_URL}/login?message=otp-expired`);
         }
 
         const user = await User.findOneAndUpdate({ email }, { isVerified: true }, { new: true });
-        if (!user) return res.redirect(`${process.env.PUBLIC_FRONTEND_URL}/login?message=user-not-found`);
+        if (!user) return res.redirect(`${process.env.RATEPRO_URL}/login?message=user-not-found`);
 
         const baseURL = user.role === "admin" || user.role === "companyAdmin"
             ? process.env.FRONTEND_URL
-            : process.env.PUBLIC_FRONTEND_URL;
+            : process.env.RATEPRO_URL;
 
         await OTP.deleteMany({ email, purpose: "verify" });
 
@@ -174,7 +173,7 @@ exports.verifyEmailLink = async (req, res, next) => {
         return res.redirect(`${baseURL}/app`);
     } catch (err) {
         console.error("Verify email link error:", err);
-        return res.redirect(`${process.env.PUBLIC_FRONTEND_URL}/login?message=error`);
+        return res.redirect(`${process.env.RATEPRO_URL}/login?message=error`);
     }
 };
 
@@ -220,7 +219,7 @@ exports.resendOtp = async (req, res, next) => {
 
         const baseURL = user.role === "admin" || user.role === "companyAdmin"
             ? process.env.FRONTEND_URL
-            : process.env.PUBLIC_FRONTEND_URL;
+            : process.env.RATEPRO_URL;
 
         const emailContent = {
             to: email,
@@ -274,11 +273,12 @@ exports.loginUser = async (req, res, next) => {
             const otpCode = generateOTP();
             const expiresAt = moment().add(process.env.OTP_EXPIRE_MINUTES, "minutes").toDate();
             await OTP.create({ email, code: otpCode, expiresAt, purpose: "verify" });
-
+            
             const baseURL =
-                user.role === "admin" || user.role === "companyAdmin"
+                ["admin", "companyAdmin", "member"].includes(user.role)
                     ? process.env.FRONTEND_URL
-                    : process.env.PUBLIC_FRONTEND_URL;
+                    : process.env.RATEPRO_URL;           
+
             const link = `${baseURL}/verify-email?code=${otpCode}&email=${email}`;
 
             await sendEmail({
