@@ -70,6 +70,8 @@ const customRoleSchema = new mongoose.Schema({
       },
     }
   ],
+  users: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }], // Track assigned users
+  userCount: { type: Number, default: 0 }, // Store count of assigned users
   // Who created this role (companyAdmin)
   createdBy: {
     type: mongoose.Schema.Types.ObjectId,

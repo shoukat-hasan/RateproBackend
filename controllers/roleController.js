@@ -78,7 +78,7 @@ const createRoleSchema = Joi.object({
     "any.required": "Role name is required",
   }),
   permissions: Joi.array().items(Joi.string().hex().length(24)).optional(),
-  description: Joi.string().optional(),
+  description: Joi.string().allow("").optional(),
   tenantId: Joi.string().hex().length(24).optional(),
 });
 
@@ -199,6 +199,13 @@ exports.assignRoleToUser = async (req, res, next) => {
     if (!user.customRoles.some(r => r.toString() === roleId)) {
       user.customRoles.push(roleId);
       await user.save();
+    }
+
+    // Add user to role's users array and update userCount
+    if (!role.users.includes(userId)) {
+      role.users.push(userId);
+      role.userCount = role.users.length; // Update userCount manually (optional, since pre-save middleware handles it)
+      await role.save();
     }
 
     const updatedUser = await User.findById(userId).select("-password").populate("tenant customRoles");
