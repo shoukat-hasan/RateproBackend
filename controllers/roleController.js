@@ -94,6 +94,10 @@ const removeRoleSchema = Joi.object({
   roleId: Joi.string().hex().length(24).required(),
 });
 
+const getUsersByRoleSchema = Joi.object({
+  roleId: Joi.string().hex().length(24).required(),
+});
+
 exports.createRole = async (req, res) => {
   try {
     const { name, permissions, description, tenantId } = req.body;
@@ -108,6 +112,34 @@ exports.createRole = async (req, res) => {
         message: `Cannot create role for another tenant. User tenant: ${req.user.tenant._id}, Payload tenant: ${tenantId}`,
       });
     }
+
+    // --- Role-based restrictions ---
+    if (req.user.role === "companyAdmin") {
+      // companyAdmin allowed without extra check
+    } else if (req.user.role === "member") {
+      // check if member has 'role:create' permission
+      const populatedUser = await User.findById(req.user._id).populate({
+        path: "customRoles",
+        populate: { path: "permissions" },
+      });
+
+      if (!populatedUser) {
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      const hasPermission = populatedUser.customRoles?.some(
+        (role) =>
+          role.permissions &&
+          role.permissions.some((p) => p.name === "role:create")
+      );
+
+      if (!hasPermission) {
+        return res.status(403).json({ message: "Access denied: Permission 'role:create' required" });
+      }
+    } else {
+      return res.status(403).json({ message: "Only CompanyAdmin or Member (with permission) can create roles" });
+    }
+
     const existingRole = await CustomRole.findOne({ name, tenant: tenantId });
     if (existingRole) {
       return res.status(400).json({ message: "Role already exists" });
@@ -141,19 +173,33 @@ exports.getRoles = async (req, res, next) => {
 
     if (!["companyAdmin"].includes(req.user.role)) {
       return res.status(403).json({ message: "Only companyAdmin can view roles" });
+    } else if (req.user.role === "member") {
+      // check if member has 'role:read' permission
+      const populatedUser = await User.findById(req.user._id).populate({
+        path: "customRoles",
+        populate: { path: "permissions" },
+      });
+
+      if (!populatedUser) {
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      const hasPermission = populatedUser.customRoles?.some(
+        (role) =>
+          role.permissions &&
+          role.permissions.some((p) => p.name === "role:read")
+      );
+
+      if (!hasPermission) {
+        return res.status(403).json({ message: "Access denied: Permission 'role:read' required" });
+      }
     }
 
     let query = {};
     if (req.user.role === "companyAdmin") {
-      if (!req.tenantId) {
-        console.error("TenantId is undefined for companyAdmin");
-        return res.status(400).json({ message: "TenantId is required for companyAdmin" });
-      }
-      query.tenant = new mongoose.Types.ObjectId(req.tenantId); 
-    } else if (req.user.role === "admin" && tenantId) {
-      query.tenant = new mongoose.Types.ObjectId(tenantId); 
-    } else if (req.user.role === "admin") {
-      query.tenant = null;
+      query.tenant = new mongoose.Types.ObjectId(req.tenantId);
+    } else if (req.user.role === "member") {
+      query.tenant = new mongoose.Types.ObjectId(req.user.tenant._id);
     }
 
     const roles = await CustomRole.find(query).populate("permissions tenant");
@@ -174,8 +220,35 @@ exports.assignRoleToUser = async (req, res, next) => {
     const { userId } = req.params;
     const { roleId } = req.body;
 
-    if (!["companyAdmin"].includes(req.user.role)) {
-      return res.status(403).json({ message: "Only companyAdmin can assign roles" });
+    // if (!["companyAdmin"].includes(req.user.role)) {
+    //   return res.status(403).json({ message: "Only companyAdmin can assign roles" });
+    // }
+
+    // --- Role-based restrictions ---
+    if (req.user.role === "companyAdmin") {
+      // allowed directly
+    } else if (req.user.role === "member") {
+      // check if member has 'role:assign' permission
+      const populatedUser = await User.findById(req.user._id).populate({
+        path: "customRoles",
+        populate: { path: "permissions" },
+      });
+
+      if (!populatedUser) {
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      const hasPermission = populatedUser.customRoles?.some(
+        (role) =>
+          role.permissions &&
+          role.permissions.some((p) => p.name === "role:assign")
+      );
+
+      if (!hasPermission) {
+        return res.status(403).json({ message: "Access denied: Permission 'role:assign' required" });
+      }
+    } else {
+      return res.status(403).json({ message: "Only companyAdmin or member (with permission) can assign roles" });
     }
 
     const role = await CustomRole.findById(roleId).populate("tenant");
@@ -226,9 +299,36 @@ exports.removeRoleFromUser = async (req, res, next) => {
     const { userId } = req.params;
     const { roleId } = req.body;
 
-    // Restrict to companyAdmin
-    if (!["companyAdmin"].includes(req.user.role)) {
-      return res.status(403).json({ message: "Only companyAdmin can remove roles" });
+    // // Restrict to companyAdmin
+    // if (!["companyAdmin"].includes(req.user.role)) {
+    //   return res.status(403).json({ message: "Only companyAdmin can remove roles" });
+    // }
+
+     // --- Role-based restrictions ---
+     if (req.user.role === "companyAdmin") {
+      // allowed directly
+    } else if (req.user.role === "member") {
+      // check if member has 'role:remove' permission
+      const populatedUser = await User.findById(req.user._id).populate({
+        path: "customRoles",
+        populate: { path: "permissions" },
+      });
+
+      if (!populatedUser) {
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      const hasPermission = populatedUser.customRoles?.some(
+        (role) =>
+          role.permissions &&
+          role.permissions.some((p) => p.name === "role:remove")
+      );
+
+      if (!hasPermission) {
+        return res.status(403).json({ message: "Access denied: Permission 'role:remove' required" });
+      }
+    } else {
+      return res.status(403).json({ message: "Only companyAdmin or member (with permission) can remove roles" });
     }
 
     const role = await CustomRole.findById(roleId).populate("tenant");
@@ -238,15 +338,21 @@ exports.removeRoleFromUser = async (req, res, next) => {
     if (!user) return res.status(404).json({ message: "User not found" });
 
     // Tenant scoping
-    if (req.user.role !== "admin" && role.tenant && role.tenant.toString() !== req.tenantId) {
-      return res.status(403).json({ message: "Cannot remove role from different tenant" });
+    if (req.user.role !== "admin" && role.tenant && role.tenant._id.toString() !== req.tenantId) {
+      return res.status(403).json({ message: "Cannot assign role from different tenant" });
     }
     if (req.user.role !== "admin" && user.tenant && user.tenant.toString() !== req.tenantId) {
-      return res.status(403).json({ message: "Cannot remove role from user in different tenant" });
+      return res.status(403).json({ message: "Cannot assign role to user from different tenant" });
     }
 
-    user.customRoles = (user.customRoles || []).filter(r => r.toString() !== roleId);
+    user.customRoles = (user.customRoles || []).filter(
+      r => !(r._id ? r._id.equals(roleId) : r.equals(roleId))
+    );
     await user.save();
+
+    role.users = (role.users || []).filter(u => u.toString() !== userId);
+    role.userCount = role.users.length;
+    await role.save();
 
     const updatedUser = await User.findById(userId).select("-password").populate("tenant customRoles");
 
@@ -269,8 +375,35 @@ exports.updateRole = async (req, res, next) => {
     const { name, permissions, description, tenantId } = req.body;
 
     // Restrict to companyAdmin
-    if (!["companyAdmin"].includes(req.user.role)) {
-      return res.status(403).json({ message: "Only companyAdmin can update roles" });
+    // if (!["companyAdmin"].includes(req.user.role)) {
+    //   return res.status(403).json({ message: "Only companyAdmin can update roles" });
+    // }
+
+     // --- Role-based restrictions ---
+     if (req.user.role === "companyAdmin") {
+      // allowed directly
+    } else if (req.user.role === "member") {
+      // check if member has 'role:remove' permission
+      const populatedUser = await User.findById(req.user._id).populate({
+        path: "customRoles",
+        populate: { path: "permissions" },
+      });
+
+      if (!populatedUser) {
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      const hasPermission = populatedUser.customRoles?.some(
+        (role) =>
+          role.permissions &&
+          role.permissions.some((p) => p.name === "role:update")
+      );
+
+      if (!hasPermission) {
+        return res.status(403).json({ message: "Access denied: Permission 'role:remove' required" });
+      }
+    } else {
+      return res.status(403).json({ message: "Only companyAdmin or member (with permission) can remove roles" });
     }
 
     const role = await CustomRole.findById(roleId).populate("tenant");
@@ -321,8 +454,35 @@ exports.deleteRole = async (req, res, next) => {
     const { roleId } = req.params;
 
     // Restrict to companyAdmin
-    if (!["companyAdmin"].includes(req.user.role)) {
-      return res.status(403).json({ message: "Only companyAdmin can delete roles" });
+    // if (!["companyAdmin"].includes(req.user.role)) {
+    //   return res.status(403).json({ message: "Only companyAdmin can delete roles" });
+    // }
+
+    // --- Role-based restrictions ---
+    if (req.user.role === "companyAdmin") {
+      // allowed directly
+    } else if (req.user.role === "member") {
+      // check if member has 'role:remove' permission
+      const populatedUser = await User.findById(req.user._id).populate({
+        path: "customRoles",
+        populate: { path: "permissions" },
+      });
+
+      if (!populatedUser) {
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      const hasPermission = populatedUser.customRoles?.some(
+        (role) =>
+          role.permissions &&
+          role.permissions.some((p) => p.name === "role:delete")
+      );
+
+      if (!hasPermission) {
+        return res.status(403).json({ message: "Access denied: Permission 'role:remove' required" });
+      }
+    } else {
+      return res.status(403).json({ message: "Only companyAdmin or member (with permission) can remove roles" });
     }
 
     const role = await CustomRole.findById(roleId).populate("tenant");
@@ -349,6 +509,67 @@ exports.deleteRole = async (req, res, next) => {
     res.status(200).json({ message: "Role deleted" });
   } catch (err) {
     console.error("Error deleting role:", err);
+    next(err);
+  }
+};
+
+exports.getUsersByRole = async (req, res, next) => {
+  try {
+    const { error } = getUsersByRoleSchema.validate(req.params);
+    if (error) {
+      return res.status(400).json({ message: error.details[0].message });
+    }
+
+    const { roleId } = req.params;
+
+    // if (!["companyAdmin"].includes(req.user.role)) {
+    //   return res.status(403).json({ message: "Only companyAdmin can view users by role" });
+    // }
+
+    // --- Role-based restrictions ---
+    if (req.user.role === "companyAdmin") {
+      // allowed directly
+    } else if (req.user.role === "member") {
+      // check if member has 'role:remove' permission
+      const populatedUser = await User.findById(req.user._id).populate({
+        path: "customRoles",
+        populate: { path: "permissions" },
+      });
+
+      if (!populatedUser) {
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      const hasPermission = populatedUser.customRoles?.some(
+        (role) =>
+          role.permissions &&
+          role.permissions.some((p) => p.name === "role:read")
+      );
+
+      if (!hasPermission) {
+        return res.status(403).json({ message: "Access denied: Permission 'role:remove' required" });
+      }
+    } else {
+      return res.status(403).json({ message: "Only companyAdmin or member (with permission) can remove roles" });
+    }
+
+    const role = await CustomRole.findById(roleId).populate("tenant users", "name email _id");
+    if (!role) {
+      return res.status(404).json({ message: "Role not found" });
+    }
+
+    if (
+      req.user.role !== "admin" &&
+      role.tenant &&
+      role.tenant._id &&
+      role.tenant._id.toString() !== req.tenantId
+    ) {
+      return res.status(403).json({ message: "Cannot view users for role from different tenant" });
+    }
+
+    res.status(200).json({ message: "Users retrieved", users: role.users || [] });
+  } catch (err) {
+    console.error("Error getting users by role:", err);
     next(err);
   }
 };
