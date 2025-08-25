@@ -144,13 +144,24 @@ exports.createRole = async (req, res) => {
     if (existingRole) {
       return res.status(400).json({ message: "Role already exists" });
     }
+    // const validPermissions = await Permission.find({ _id: { $in: permissions } });
+    // if (validPermissions.length !== permissions.length) {
+    //   return res.status(400).json({ message: "Invalid permissions provided" });
+    // }
+    // Fetch permissions with their names
     const validPermissions = await Permission.find({ _id: { $in: permissions } });
     if (validPermissions.length !== permissions.length) {
       return res.status(400).json({ message: "Invalid permissions provided" });
     }
+
+    // Create permissions array with both _id and name
+    const permissionsWithNames = validPermissions.map((perm) => ({
+      _id: perm._id,
+      name: perm.name,
+    }));
     const role = await CustomRole.create({
       name,
-      permissions,
+      permissions: permissionsWithNames,
       description,
       tenant: tenantId, // Changed from tenantId to tenant
       createdBy: req.user._id,
@@ -170,9 +181,11 @@ exports.getRoles = async (req, res, next) => {
     }
 
     const { tenantId } = req.query;
+    let query = {};
 
-    if (!["companyAdmin"].includes(req.user.role)) {
-      return res.status(403).json({ message: "Only companyAdmin can view roles" });
+    if (req.user.role === "companyAdmin") {
+      // companyAdmin is always allowed
+      query.tenant = new mongoose.Types.ObjectId(req.tenantId);
     } else if (req.user.role === "member") {
       // check if member has 'role:read' permission
       const populatedUser = await User.findById(req.user._id).populate({
@@ -195,7 +208,6 @@ exports.getRoles = async (req, res, next) => {
       }
     }
 
-    let query = {};
     if (req.user.role === "companyAdmin") {
       query.tenant = new mongoose.Types.ObjectId(req.tenantId);
     } else if (req.user.role === "member") {
@@ -304,8 +316,8 @@ exports.removeRoleFromUser = async (req, res, next) => {
     //   return res.status(403).json({ message: "Only companyAdmin can remove roles" });
     // }
 
-     // --- Role-based restrictions ---
-     if (req.user.role === "companyAdmin") {
+    // --- Role-based restrictions ---
+    if (req.user.role === "companyAdmin") {
       // allowed directly
     } else if (req.user.role === "member") {
       // check if member has 'role:remove' permission
@@ -379,8 +391,8 @@ exports.updateRole = async (req, res, next) => {
     //   return res.status(403).json({ message: "Only companyAdmin can update roles" });
     // }
 
-     // --- Role-based restrictions ---
-     if (req.user.role === "companyAdmin") {
+    // --- Role-based restrictions ---
+    if (req.user.role === "companyAdmin") {
       // allowed directly
     } else if (req.user.role === "member") {
       // check if member has 'role:remove' permission
