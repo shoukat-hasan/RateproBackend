@@ -273,11 +273,11 @@ exports.loginUser = async (req, res, next) => {
             const otpCode = generateOTP();
             const expiresAt = moment().add(process.env.OTP_EXPIRE_MINUTES, "minutes").toDate();
             await OTP.create({ email, code: otpCode, expiresAt, purpose: "verify" });
-            
+
             const baseURL =
                 ["admin", "companyAdmin", "member"].includes(user.role)
                     ? process.env.FRONTEND_URL
-                    : process.env.RATEPRO_URL;           
+                    : process.env.RATEPRO_URL;
 
             const link = `${baseURL}/verify-email?code=${otpCode}&email=${email}`;
 
@@ -495,7 +495,10 @@ exports.getMe = async (req, res, next) => {
                 populate: { path: 'departments', model: 'Department' },
             })
             .populate('department')
-            .populate('customRoles');
+            .populate({
+                path: 'customRoles',
+                populate: { path: 'permissions', model: 'Permission' },
+            });
 
         if (!user) {
             //   console.log('getMe: User not found', { userId });
