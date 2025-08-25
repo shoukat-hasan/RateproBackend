@@ -28,6 +28,7 @@ const {
   removeRoleFromUser,
   updateRole,
   deleteRole,
+  getUsersByRole,
 } = require("../controllers/roleController");
 
 // Role management (admin and companyAdmin only)
@@ -37,5 +38,7 @@ router.post("/assign/:userId", protect, allowRoles("companyAdmin"), assignRoleTo
 router.post("/remove/:userId", protect, allowRoles("companyAdmin"), removeRoleFromUser);
 router.put("/:roleId", protect, allowRoles("companyAdmin"), updateRole);
 router.delete("/:roleId", protect, allowRoles("companyAdmin"), deleteRole);
+
+router.get("/:roleId/users", protect, allowRoles("companyAdmin"), getUsersByRole);
 
 module.exports = router;
