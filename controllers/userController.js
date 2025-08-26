@@ -1,4 +1,5 @@
 const mongoose = require("mongoose");
+const jwt = require("jsonwebtoken");
 const User = require("../models/User");
 const Tenant = require("../models/Tenant");
 const OTP = require("../models/OTP");
@@ -12,11 +13,25 @@ const bcrypt = require("bcryptjs");
 const moment = require("moment");
 const Joi = require("joi");
 const getBaseURL = require("../utils/getBaseURL");
+const XLSX = require('xlsx');
+
+// Multer setup for Excel
+const multer = require('multer');
+const upload = multer({ storage: multer.memoryStorage() });
 
 // Helper: Generate OTP Code
 const generateOTP = () => Math.floor(100000 + Math.random() * 900000).toString();
 
 // Validation Schemas
+const bulkUserSchema = Joi.object({
+  name: Joi.string().min(2).max(50).required(),
+  email: Joi.string().email().required(),
+  password: Joi.string().min(6).required(),
+  isActive: Joi.boolean().optional(),
+  role: Joi.string().valid('member').required(),
+  department: Joi.string().required(), // Department name (not ID)
+});
+
 const createUserSchema = Joi.object({
   name: Joi.string().min(2).max(50).required(),
   email: Joi.string().email().required(),
@@ -78,6 +93,158 @@ const updateMeSchema = Joi.object({
   }).optional(),
 });
 
+exports.bulkCreateUsers = async (req, res) => {
+  try {
+
+    const currentUser = req.user;
+    if (currentUser.role !== 'companyAdmin') {
+      return res.status(403).json({ message: 'Access denied: Only CompanyAdmin can perform bulk upload' });
+    }
+
+    if (!req.file) {
+      return res.status(400).json({ message: 'No Excel file uploaded' });
+    }
+
+    const workbook = XLSX.read(req.file.buffer, { type: 'buffer' });
+    const sheetName = workbook.SheetNames[0];
+    const worksheet = workbook.Sheets[sheetName];
+    const rows = XLSX.utils.sheet_to_json(worksheet, { header: 1, blankrows: false });
+
+    if (rows.length < 2) {
+      return res.status(400).json({ message: 'Empty or invalid Excel file' });
+    }
+
+    const dataRows = rows.slice(1);
+    const tenantId = currentUser.tenant._id ? currentUser.tenant._id.toString() : currentUser.tenant;
+
+    const tenantData = await Tenant.findById(tenantId).populate('departments');
+    if (!tenantId || !tenantData) {
+      return res.status(403).json({ message: 'Access denied: No valid tenant associated' });
+    }
+
+    // Collect unique departments
+    const deptNamesSet = new Set();
+    dataRows.forEach(row => {
+      if (row[5]) deptNamesSet.add(row[5].toString().trim());
+    });
+
+    const uniqueDeptNames = Array.from(deptNamesSet);
+
+    const existingDepts = await Department.find({ tenant: tenantId, name: { $in: uniqueDeptNames } });
+
+    const deptMap = new Map(existingDepts.map(dept => [dept.name, dept._id.toString()]));
+
+    const missingDepts = uniqueDeptNames.filter(name => !deptMap.has(name));
+    if (missingDepts.length > 0) {
+      const newDepts = missingDepts.map(name => ({ tenant: tenantId, name, head: '' }));
+      const createdDepts = await Department.insertMany(newDepts);
+      createdDepts.forEach(dept => deptMap.set(dept.name, dept._id.toString()));
+      await Tenant.findByIdAndUpdate(tenantId, { $push: { departments: { $each: createdDepts.map(d => d._id) } } });
+    }
+
+    // Process rows
+    const successes = [];
+    const errors = [];
+
+    for (const row of dataRows) {
+
+      if (row.length < 6) {
+        errors.push({ row: row.join(','), message: 'Invalid row length' });
+        continue;
+      }
+
+      const [name, email, password, role, statusStr, departmentName] = row.map(val => val.toString().trim());
+      const isActive = statusStr.toLowerCase() === 'active';
+
+      // Validation
+      const { error: validationError } = bulkUserSchema.validate({ name, email, password, isActive, role, department: departmentName });
+      if (validationError) {
+        errors.push({ email, message: validationError.details[0].message });
+        continue;
+      }
+
+      if (role !== 'member') {
+        errors.push({ email, message: 'Invalid role, must be member' });
+        continue;
+      }
+
+      const existingUser = await User.findOne({ email });
+      if (existingUser) {
+        errors.push({ email, message: 'User already exists with this email' });
+        continue;
+      }
+
+      const deptId = deptMap.get(departmentName);
+      if (!deptId) {
+        errors.push({ email, message: 'Department not found or created' });
+        continue;
+      }
+
+      const hashedPassword = await bcrypt.hash(password, 10);
+
+      const newUser = await User.create({
+        name,
+        email,
+        password: hashedPassword,
+        role: 'member',
+        authProvider: 'local',
+        tenant: tenantId,
+        department: deptId,
+        isVerified: false,
+        isActive,
+        createdBy: currentUser._id,
+        deleted: false,
+        phone: '',
+        bio: '',
+        avatar: { public_id: '', url: '' },
+        customRoles: [],
+        surveyStats: null,
+      });
+
+      const verificationCode = generateOTP();
+      const expiresAt = moment().add(process.env.OTP_EXPIRE_MINUTES || 15, 'minutes').toDate();
+      await OTP.create({ email, code: verificationCode, purpose: 'verify', expiresAt });
+
+      const baseURLs = getBaseURL();
+      const baseURL = baseURLs.public;
+      const verificationLink = `${baseURL}/verify-email?code=${verificationCode}&email=${encodeURIComponent(email)}`;
+
+      // console.log("📧 Sending email to:", email);
+      await sendEmail({
+        to: email,
+        subject: 'Verify your email - RatePro',
+        html: `
+          <p>Hello ${name},</p>
+          <p>Your account has been successfully created.</p>
+          <p><strong>Login Email:</strong> ${email}</p>
+          <p><strong>Temporary Password:</strong> ${password}</p>
+          <p>Please verify your email by clicking the link below:</p>
+          <p><a href="${verificationLink}" target="_blank">${verificationLink}</a></p>
+          <p>This code will expire in ${process.env.OTP_EXPIRE_MINUTES} minute(s).</p>
+          <br/>
+          <p>Regards,<br/>Team</p>
+        `,
+      });
+
+      successes.push({ id: newUser._id, email: newUser.email });
+    }
+
+    res.status(201).json({
+      message: 'Bulk user creation processed',
+      successful: successes.length,
+      errors: errors.length > 0 ? errors : null,
+      createdUsers: successes,
+    });
+  } catch (err) {
+    console.error('💥 BulkCreateUsers error:', err);
+    if (err.code === 11000) {
+      return res.status(400).json({ message: 'Duplicate key error (e.g., email)' });
+    }
+    res.status(500).json({ message: 'Internal Server Error' });
+  }
+};
+
+
 exports.createUser = async (req, res) => {
   try {
     // Validate request
@@ -131,7 +298,7 @@ exports.createUser = async (req, res) => {
       const userTenantId = currentUser.tenant._id ? currentUser.tenant._id.toString() : currentUser.tenant;
       tenantId = tenant || userTenantId;
       if (tenant && tenant !== userTenantId) {
-        console.log('Tenant mismatch');
+        // console.log('Tenant mismatch');
         return res.status(403).json({ message: 'Access denied: Invalid tenant' });
       }
     }
@@ -195,7 +362,7 @@ exports.createUser = async (req, res) => {
     const verificationCode = generateOTP();
     const expiresAt = moment().add(process.env.OTP_EXPIRE_MINUTES || 15, 'minutes').toDate();
     await OTP.create({ email, code: verificationCode, purpose: 'verify', expiresAt });
-    console.log('OTP generated:', verificationCode);
+    // console.log('OTP generated:', verificationCode);
 
     const baseURLs = getBaseURL();
     const baseURL = role === 'user' ? baseURLs.public : baseURLs.admin;
@@ -720,35 +887,137 @@ exports.sendNotification = async (req, res, next) => {
   }
 };
 
+// exports.updateMe = async (req, res, next) => {
+//   try {
+//     // ----------------- VALIDATION -----------------
+//     const { error } = updateMeSchema.validate(req.body);
+//     if (error) return res.status(400).json({ message: error.details[0].message });
+
+//     // ----------------- JWT VERIFY -----------------
+//     const token = req.cookies?.accessToken;
+//     if (!token) return res.status(401).json({ message: "No token provided" });
+
+//     const decoded = jwt.verify(token, process.env.JWT_SECRET);
+//     const userId = decoded.id;
+
+//     // ----------------- FETCH USER -----------------
+//     const user = await User.findById(userId).populate("tenant");
+//     if (!user) return res.status(404).json({ message: "User not found" });
+
+//     // ----------------- UPDATE USER FIELDS -----------------
+//     const fieldsToUpdate = ["name", "email", "phone", "bio", "department"];
+//     fieldsToUpdate.forEach((field) => {
+//       if (req.body[field] !== undefined) user[field] = req.body[field];
+//     });
+
+//     // ----------------- TENANT/COMPANY UPDATE (only for companyAdmin) -----------------
+//     if (req.body.tenant && user.role === "companyAdmin") {
+//       let tenant = await Tenant.findById(user.tenant?._id);
+//       if (!tenant) return res.status(404).json({ message: "Tenant not found" });
+
+//       const tenantUpdates = req.body.tenant;
+//       Object.assign(tenant, {
+//         name: tenantUpdates.name ?? tenant.name,
+//         address: tenantUpdates.address ?? tenant.address,
+//         contactEmail: tenantUpdates.contactEmail ?? tenant.contactEmail,
+//         contactPhone: tenantUpdates.contactPhone ?? tenant.contactPhone,
+//         website: tenantUpdates.website ?? tenant.website,
+//         totalEmployees: tenantUpdates.totalEmployees ?? tenant.totalEmployees,
+//         departments: tenantUpdates.departments ?? tenant.departments,
+//       });
+//       await tenant.save();
+//     }
+
+//     // ----------------- AVATAR UPLOAD -----------------
+//     if (req.file) {
+//       if (user.avatar?.public_id) {
+//         await cloudinary.uploader.destroy(user.avatar.public_id);
+//       }
+
+//       const uploadResult = await cloudinary.uploader.upload(req.file.path, {
+//         folder: "avatars",
+//         width: 300,
+//         crop: "scale",
+//       });
+//       fs.unlinkSync(req.file.path);
+//       user.avatar = { public_id: uploadResult.public_id, url: uploadResult.secure_url };
+//     }
+
+//     await user.save();
+
+//     // ----------------- SAFE USER OBJECT -----------------
+//     const safeUser = {
+//       _id: user._id,
+//       name: user.name,
+//       email: user.email,
+//       phone: user.phone,
+//       bio: user.bio,
+//       role: user.role,
+//       customRoles: user.customRoles,
+//       authProvider: user.authProvider,
+//       isActive: user.isActive,
+//       isVerified: user.isVerified,
+//       tenant: user.tenant,
+//       department: user.department,
+//       avatar: user.avatar,
+//       createdAt: user.createdAt,
+//       updatedAt: user.updatedAt,
+//     };
+
+//     res.status(200).json({ message: "Profile updated successfully", user: safeUser });
+//   } catch (err) {
+//     console.error("updateMe error:", err);
+//     next(err);
+//   }
+// };
+
 exports.updateMe = async (req, res, next) => {
   try {
     // ----------------- VALIDATION -----------------
     const { error } = updateMeSchema.validate(req.body);
-    if (error) return res.status(400).json({ message: error.details[0].message });
+    if (error) {
+      return res.status(400).json({ message: error.details[0].message });
+    }
 
     // ----------------- JWT VERIFY -----------------
-    const token = req.headers.authorization?.split(" ")[1];
-    if (!token) return res.status(401).json({ message: "No token provided" });
+    const token = req.cookies?.accessToken;
 
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    const userId = decoded.id;
+    if (!token) {
+      return res.status(401).json({ message: "No token provided" });
+    }
+
+    let decoded;
+    try {
+      decoded = jwt.verify(token, process.env.JWT_SECRET);
+    } catch (err) {
+      return res.status(401).json({ message: "Invalid or expired token" });
+    }
+
+    const userId = decoded._id || decoded.id;
 
     // ----------------- FETCH USER -----------------
     const user = await User.findById(userId).populate("tenant");
-    if (!user) return res.status(404).json({ message: "User not found" });
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
 
     // ----------------- UPDATE USER FIELDS -----------------
     const fieldsToUpdate = ["name", "email", "phone", "bio", "department"];
     fieldsToUpdate.forEach((field) => {
-      if (req.body[field] !== undefined) user[field] = req.body[field];
+      if (req.body[field] !== undefined) {
+        user[field] = req.body[field];
+      }
     });
 
-    // ----------------- TENANT/COMPANY UPDATE (only for companyAdmin) -----------------
+    // ----------------- TENANT/COMPANY UPDATE -----------------
     if (req.body.tenant && user.role === "companyAdmin") {
       let tenant = await Tenant.findById(user.tenant?._id);
-      if (!tenant) return res.status(404).json({ message: "Tenant not found" });
+      if (!tenant) {
+        return res.status(404).json({ message: "Tenant not found" });
+      }
 
       const tenantUpdates = req.body.tenant;
+
       Object.assign(tenant, {
         name: tenantUpdates.name ?? tenant.name,
         address: tenantUpdates.address ?? tenant.address,
@@ -758,6 +1027,7 @@ exports.updateMe = async (req, res, next) => {
         totalEmployees: tenantUpdates.totalEmployees ?? tenant.totalEmployees,
         departments: tenantUpdates.departments ?? tenant.departments,
       });
+
       await tenant.save();
     }
 
@@ -772,8 +1042,13 @@ exports.updateMe = async (req, res, next) => {
         width: 300,
         crop: "scale",
       });
+
       fs.unlinkSync(req.file.path);
-      user.avatar = { public_id: uploadResult.public_id, url: uploadResult.secure_url };
+
+      user.avatar = { 
+        public_id: uploadResult.public_id, 
+        url: uploadResult.secure_url 
+      };
     }
 
     await user.save();
@@ -799,7 +1074,7 @@ exports.updateMe = async (req, res, next) => {
 
     res.status(200).json({ message: "Profile updated successfully", user: safeUser });
   } catch (err) {
-    console.error("updateMe error:", err);
+    console.error("❌ [updateMe] error:", err);
     next(err);
   }
 };
