@@ -447,11 +447,6 @@ exports.updateProfile = async (req, res, next) => {
 
         const { name, currentPassword, newPassword } = req.body;
 
-        // Tenant scoping (for companyAdmin/member)
-        // if (req.user.tenant && req.tenantId && req.user.tenant.toString() !== req.tenantId) {
-        //     return res.status(403).json({ message: "Access denied: Wrong tenant" });
-        // }
-
         // Update avatar
         if (req.file) {
             if (user.avatar?.public_id) await cloudinary.uploader.destroy(user.avatar.public_id);
@@ -481,7 +476,7 @@ exports.updateProfile = async (req, res, next) => {
     } catch (err) {
         next(err);
     }
-};
+}
 
 exports.getMe = async (req, res, next) => {
     try {

@@ -44,7 +44,8 @@
 
 const express = require("express");
 const router = express.Router();
-const upload = require("../middlewares/multer");
+// const upload = require("../middlewares/multer");
+const { upload } = require('../middlewares/multer');
 const { protect } = require("../middlewares/authMiddleware");
 const { authLimiter } = require("../middlewares/rateLimiter");
 const { allowRoles } = require("../middlewares/roleMiddleware");
