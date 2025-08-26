@@ -17,6 +17,8 @@ const permissions = [
     { name: "role:delete", description: "Delete custom roles", group: "role" },
     { name: "role:assign", description: "Assign roles to users", group: "role" },
     { name: "role:remove", description: "Remove roles to users", group: "role" },
+    { name: 'permission:assign', description: 'Assign permissions to users' },
+    { name: 'permission:read', description: 'Read permission assignments' },
     // Survey
     { name: "survey:read", description: "View all surveys", group: "survey" },
     { name: "survey:create", description: "Create new surveys", group: "survey" },

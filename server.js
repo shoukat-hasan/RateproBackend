@@ -159,6 +159,7 @@ app.use("/api/users", require("./routes/userRoutes"));
 app.use('/api/tenants', require("./routes/tenantRoutes"));
 app.use("/api/roles", require("./routes/roleRoutes"));
 app.use("/api/permissions", require("./routes/permissionRoutes.js"));
+app.use('/api', require("./routes/permissionAssignmentRoutes.js"));
 app.use("/api/surveys", require("./routes/surveyRoutes"));
 
 // Error Handling Middleware
