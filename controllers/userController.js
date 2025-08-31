@@ -8,6 +8,7 @@ const Permission = require("../models/Permission");
 const sendEmail = require("../utils/sendEmail");
 const cloudinary = require("../utils/cloudinary");
 const PDFDocument = require("pdfkit");
+const axios = require("axios");
 const fs = require("fs");
 const bcrypt = require("bcryptjs");
 const moment = require("moment");
@@ -243,7 +244,6 @@ exports.bulkCreateUsers = async (req, res) => {
     res.status(500).json({ message: 'Internal Server Error' });
   }
 };
-
 
 exports.createUser = async (req, res) => {
   try {
@@ -818,40 +818,78 @@ exports.exportUserDataPDF = async (req, res, next) => {
     //   return res.status(403).json({ message: "Access denied: Wrong tenant" });
     // }
 
-    const doc = new PDFDocument();
+    const doc = new PDFDocument({ margin: 50 });
+
     res.setHeader("Content-Type", "application/pdf");
-    res.setHeader("Content-Disposition", `attachment; filename="user-${user._id}.pdf"`);
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="user-${user._id}.pdf"`
+    );
 
     doc.pipe(res);
 
-    doc.fontSize(20).text("User Data Report", { align: "center" });
-    doc.moveDown();
-    doc.fontSize(14);
-    doc.text(`Name: ${user.name}`);
-    doc.text(`Email: ${user.email}`);
-    doc.text(`Role: ${user.role}`);
-    doc.text(`Active: ${user.isActive}`);
-    doc.text(`Verified: ${user.isVerified}`);
-    doc.text(`Department: ${user.department?.name || "N/A"}`);
-    doc.moveDown();
+    // ===== Header (logo + title) =====
+    const logoUrl = "https://ratepro-sa.com/assets/img/RATEPRO_-BupZjzpX.png";
+    const response = await axios.get(logoUrl, { responseType: "arraybuffer" });
+    const logoBuffer = Buffer.from(response.data, "binary");
 
-    // Tenant Info
+    doc.rect(0, 0, doc.page.width, 80).fill("#b6ebe0");
+    doc.image(logoBuffer, 30, 20, { width: 50 });
+    doc.fillColor("#13c5d0")
+      .fontSize(26)
+      .text("User Data Report", 0, 40, { align: "center" });
+
+    doc.moveDown(2);
+
+    // ===== Utility: Section Box =====
+    const sectionBox = (title, draw) => {
+      doc.moveDown(1);
+      const startY = doc.y;
+      const paddingY = 15; 
+
+      // Background rectangle
+      doc.rect(40, startY - 10, doc.page.width - 80, 150).fill("#b6ebe0").stroke();
+
+      doc.fillColor("#13c5d0").fontSize(16).text(title, 50, startY, { underline: true });
+
+      doc.moveDown(0.5);
+
+      doc.fillColor("black").fontSize(12);
+      draw(startY + 20 + paddingY);
+
+    };
+
+    // ===== User Info Section =====
+    sectionBox("User Information", (y) => {
+      doc.text(`Name: ${user.name}`, 60, y);
+      doc.text(`Email: ${user.email}`);
+      doc.text(`Role: ${user.role}`);
+      doc.text(`Active: ${user.isActive}`);
+      doc.text(`Verified: ${user.isVerified}`);
+      doc.text(`Department: ${user.department?.name || "N/A"}`);
+    });
+
+    // ===== Tenant Info =====
     if (user.tenant) {
-      doc.fontSize(16).text("Tenant Info:", { underline: true });
-      doc.fontSize(14);
-      doc.text(`Tenant Name: ${user.tenant.name || "N/A"}`);
-      doc.text(`Tenant Email: ${user.tenant.email || "N/A"}`);
-      doc.text(`Departments: ${user.tenant.departments?.length > 0 ? user.tenant.departments.map(d => d.name || "N/A").join(", ") : "None"}`);
-      doc.moveDown();
+      sectionBox("Company Information", (y) => {
+        doc.text(`Company Name: ${user.tenant.name || "N/A"}`, 60, y);
+        doc.text(`Company Email: ${user.tenant.email || "N/A"}`);
+        doc.text(
+          `Departments: ${user.tenant.departments?.length > 0
+            ? user.tenant.departments.map((d) => d.name || "N/A").join(", ")
+            : "None"
+          }`
+        );
+      });
     }
 
-    // Survey Stats
+    // ===== Survey Stats =====
     const stats = user.surveyStats || {};
-    doc.fontSize(16).text("Survey Stats:", { underline: true });
-    doc.fontSize(14);
-    doc.text(`Total Surveys Taken: ${stats.totalSurveysTaken || 0}`);
-    doc.text(`Total Responses: ${stats.totalResponses || 0}`);
-    doc.text(`Average Score: ${stats.averageScore || 0}`);
+    sectionBox("Survey Statistics", (y) => {
+      doc.text(`Total Surveys Taken: ${stats.totalSurveysTaken || 0}`, 60, y);
+      doc.text(`Total Responses: ${stats.totalResponses || 0}`);
+      doc.text(`Average Score: ${stats.averageScore || 0}`);
+    });
 
     doc.end();
   } catch (err) {
@@ -1045,9 +1083,9 @@ exports.updateMe = async (req, res, next) => {
 
       fs.unlinkSync(req.file.path);
 
-      user.avatar = { 
-        public_id: uploadResult.public_id, 
-        url: uploadResult.secure_url 
+      user.avatar = {
+        public_id: uploadResult.public_id,
+        url: uploadResult.secure_url
       };
     }
 

@@ -1,6 +1,7 @@
 // utils/sendEmail.js
 
 const nodemailer = require("nodemailer");
+const emailTemplate = require("./emailTemplate");
 
 const sendEmail = async ({ to, subject, html, text }) => {
   const transporter = nodemailer.createTransport({
@@ -18,7 +19,7 @@ const sendEmail = async ({ to, subject, html, text }) => {
     to,
     subject,
     text,
-    html,
+    html: emailTemplate(html),
   };
 
   await transporter.sendMail(mailOptions);
