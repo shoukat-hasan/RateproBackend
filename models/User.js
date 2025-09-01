@@ -96,6 +96,13 @@ const userSchema = new mongoose.Schema({
   surveyStats: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "SurveyStats",
+    required: function () {
+      return this.role === "user";
+    },
+    default: null,
+  },
+  lastLogin: {
+    type: Date,
     default: null,
   },
   deleted: {

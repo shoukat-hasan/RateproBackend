@@ -331,6 +331,9 @@ exports.loginUser = async (req, res, next) => {
             maxAge: 7 * 24 * 60 * 60 * 1000,
         });
 
+        user.lastLogin = Date.now();
+        await user.save();
+
         // === safeUser with fully populated data ===
         const safeUser = {
             _id: user._id,
@@ -348,6 +351,7 @@ exports.loginUser = async (req, res, next) => {
             createdAt: user.createdAt,
             updatedAt: user.updatedAt,
             companyProfileUpdated: user.companyProfileUpdated,
+            lastLogin: user.lastLogin,
         };
 
         res.status(200).json({

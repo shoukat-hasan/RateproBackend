@@ -1,44 +1,5 @@
-// const mongoose = require('mongoose');
-
-// const customRoleSchema = new mongoose.Schema({
-//   name: {
-//     type: String,
-//     required: [true, "Role name is required"],
-//     trim: true,
-//     unique: true, // Unique per tenant? Add compound index if needed
-//   },
-//   description: {
-//     type: String,
-//     default: "",
-//   },
-//   // Linked to Tenant (company)
-//   tenant: {
-//     type: mongoose.Schema.Types.ObjectId,
-//     ref: "Tenant",
-//     required: true,
-//   },
-//   // Permissions linked (array of refs to Permission model)
-//   permissions: [
-//     {
-//       type: mongoose.Schema.Types.ObjectId,
-//       ref: "Permission",
-//     }
-//   ],
-//   isActive: {
-//     type: Boolean,
-//     default: true,
-//   },
-//   deleted: {
-//     type: Boolean,
-//     default: false,
-//   },
-// }, { timestamps: true });
-
-// // Index for faster queries by tenant and name
-// customRoleSchema.index({ tenant: 1, name: 1 }, { unique: true });
-
-// module.exports = mongoose.model('CustomRole', customRoleSchema);
 const mongoose = require('mongoose');
+const crypto = require("crypto");
 
 const customRoleSchema = new mongoose.Schema({
   name: {
@@ -88,8 +49,29 @@ const customRoleSchema = new mongoose.Schema({
   },
 }, { timestamps: true });
 
+customRoleSchema.add({
+  permissionsSignature: {
+    type: String,
+    required: true,
+  }
+});
+
+// Har save se pehle permissionsSignature update karo
+customRoleSchema.pre("save", function (next) {
+  if (this.permissions && this.permissions.length > 0) {
+    const sorted = this.permissions.map(id => id.toString()).sort().join("_");
+    this.permissionsSignature = crypto.createHash("md5").update(sorted).digest("hex");
+  } else {
+    this.permissionsSignature = "";
+  }
+  next();
+});
+
+// Ab unique index tenant+name+permissionsSignature par lagao
+customRoleSchema.index({ tenant: 1, name: 1, permissionsSignature: 1 }, { unique: true });
+
 // Index for faster queries by tenant and name (unique per tenant)
-customRoleSchema.index({ tenant: 1, name: 1 }, { unique: true });
+// customRoleSchema.index({ tenant: 1, name: 1 }, { unique: true });
 
 // Pre-validate hook to ensure tenant exists
 customRoleSchema.pre('validate', async function (next) {
