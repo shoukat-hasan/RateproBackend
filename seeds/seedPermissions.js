@@ -10,6 +10,8 @@ const permissions = [
     { name: "user:toggle", description: "Toggle user active status", group: "user" },
     { name: "user:export", description: "Export user data as PDF", group: "user" },
     { name: "user:notify", description: "Send notifications to users", group: "user" },
+    { name: "user:mass-upload", description: "Bulk upload users via file", group: "user" },
+    { name: "user:file-template", description: "Download user upload template", group: "user" },
     // Role
     { name: "role:create", description: "Create custom roles", group: "role" },
     { name: "role:read", description: "View custom roles", group: "role" },

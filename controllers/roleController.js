@@ -1,74 +1,10 @@
 // controllers/roleController.js
-// const Role = require("../models/Role");
-// const User = require("../models/User");
-
-// exports.createRole = async (req, res, next) => {
-//   try {
-//     const { name, permissions = [], description, tenantId } = req.body;
-
-//     // determine tenant: admin may specify tenantId, company uses req.user.tenant
-//     let tenant = tenantId || req.user.tenant;
-//     if (!tenant && req.user.role !== "admin") return res.status(400).json({ message: "tenantId required" });
-
-//     const role = await Role.create({
-//       name, permissions, description, tenant, createdBy: req.user._id
-//     });
-
-//     res.status(201).json({ message: "Role created", role });
-//   } catch (err) { next(err); }
-// };
-
-// exports.getRoles = async (req, res, next) => {
-//   try {
-//     const tenantId = req.query.tenantId || req.user.tenant;
-//     const query = tenantId ? { tenant: tenantId } : { tenant: null };
-//     const roles = await Role.find(query);
-//     res.json(roles);
-//   } catch (err) { next(err); }
-// };
-
-// exports.assignRoleToUser = async (req, res, next) => {
-//   try {
-//     const { userId } = req.params;
-//     const { roleId } = req.body;
-
-//     const role = await Role.findById(roleId);
-//     if (!role) return res.status(404).json({ message: "Role not found" });
-
-//     const user = await User.findById(userId);
-//     if (!user) return res.status(404).json({ message: "User not found" });
-
-//     // Ensure tenant match unless admin
-//     if (req.user.role !== "admin" && String(role.tenant) !== String(req.user.tenant)) {
-//       return res.status(403).json({ message: "Cannot assign role from different tenant" });
-//     }
-
-//     user.roles = user.roles || [];
-//     if (!user.roles.some(r => String(r) === String(role._id))) user.roles.push(role._id);
-//     await user.save();
-
-//     res.json({ message: "Role assigned", user });
-//   } catch (err) { next(err); }
-// };
-
-// exports.removeRoleFromUser = async (req, res, next) => {
-//   try {
-//     const { userId } = req.params;
-//     const { roleId } = req.body;
-//     const user = await User.findById(userId);
-//     if (!user) return res.status(404).json({ message: "User not found" });
-
-//     user.roles = (user.roles || []).filter(r => String(r) !== String(roleId));
-//     await user.save();
-//     res.json({ message: "Role removed", user });
-//   } catch (err) { next(err); }
-// };
-
 const mongoose = require('mongoose');
 const CustomRole = require("../models/CustomRole");
 const User = require("../models/User");
 const Permission = require("../models/Permission");
 const Joi = require("joi");
+const crypto = require("crypto");
 
 // Validation Schemas
 const createRoleSchema = Joi.object({
@@ -98,15 +34,96 @@ const getUsersByRoleSchema = Joi.object({
   roleId: Joi.string().hex().length(24).required(),
 });
 
+// exports.createRole = async (req, res) => {
+//   try {
+//     const { name, permissions, description, tenantId } = req.body;
+//     if (!name || !permissions || !tenantId) {
+//       return res.status(400).json({ message: "Name, permissions, and tenantId are required" });
+//     }
+//     if (!req.user.tenant || !req.user.tenant._id) {
+//       return res.status(403).json({ message: "User has no associated tenant" });
+//     }
+//     if (req.user.tenant._id.toString() !== tenantId) {
+//       return res.status(403).json({
+//         message: `Cannot create role for another tenant. User tenant: ${req.user.tenant._id}, Payload tenant: ${tenantId}`,
+//       });
+//     }
+
+//     // --- Role-based restrictions ---
+//     if (req.user.role === "companyAdmin") {
+//       // companyAdmin allowed without extra check
+//     } else if (req.user.role === "member") {
+//       // check if member has 'role:create' permission
+//       const populatedUser = await User.findById(req.user._id).populate({
+//         path: "customRoles",
+//         populate: { path: "permissions" },
+//       });
+
+//       if (!populatedUser) {
+//         return res.status(404).json({ message: "User not found" });
+//       }
+
+//       const hasPermission = populatedUser.customRoles?.some(
+//         (role) =>
+//           role.permissions &&
+//           role.permissions.some((p) => p.name === "role:create")
+//       );
+
+//       if (!hasPermission) {
+//         return res.status(403).json({ message: "Access denied: Permission 'role:create' required" });
+//       }
+//     } else {
+//       return res.status(403).json({ message: "Only CompanyAdmin or Member (with permission) can create roles" });
+//     }
+
+//     const existingRole = await CustomRole.findOne({ name, tenant: tenantId });
+//     if (existingRole) {
+//       return res.status(400).json({ message: "Role already exists" });
+//     }
+//     // const validPermissions = await Permission.find({ _id: { $in: permissions } });
+//     // if (validPermissions.length !== permissions.length) {
+//     //   return res.status(400).json({ message: "Invalid permissions provided" });
+//     // }
+//     // Fetch permissions with their names
+//     const validPermissions = await Permission.find({ _id: { $in: permissions } });
+//     if (validPermissions.length !== permissions.length) {
+//       return res.status(400).json({ message: "Invalid permissions provided" });
+//     }
+
+//     // Create permissions array with both _id and name
+//     const permissionsWithNames = validPermissions.map((perm) => ({
+//       _id: perm._id,
+//       name: perm.name,
+//     }));
+//     const role = await CustomRole.create({
+//       name,
+//       permissions: permissionsWithNames,
+//       description,
+//       tenant: tenantId, // Changed from tenantId to tenant
+//       createdBy: req.user._id,
+//     });
+
+//     // Populate permissions on response
+//     await role.populate("permissions", "name");
+//     res.status(201).json({ role });
+//   } catch (error) {
+//     console.error("Error creating role:", error);
+//     res.status(500).json({ message: "Failed to create role", error: error.message });
+//   }
+// };
+
 exports.createRole = async (req, res) => {
   try {
     const { name, permissions, description, tenantId } = req.body;
+
     if (!name || !permissions || !tenantId) {
       return res.status(400).json({ message: "Name, permissions, and tenantId are required" });
     }
+
     if (!req.user.tenant || !req.user.tenant._id) {
       return res.status(403).json({ message: "User has no associated tenant" });
     }
+
     if (req.user.tenant._id.toString() !== tenantId) {
       return res.status(403).json({
         message: `Cannot create role for another tenant. User tenant: ${req.user.tenant._id}, Payload tenant: ${tenantId}`,
@@ -115,9 +132,8 @@ exports.createRole = async (req, res) => {
 
     // --- Role-based restrictions ---
     if (req.user.role === "companyAdmin") {
-      // companyAdmin allowed without extra check
+      // companyAdmin allowed
     } else if (req.user.role === "member") {
-      // check if member has 'role:create' permission
       const populatedUser = await User.findById(req.user._id).populate({
         path: "customRoles",
         populate: { path: "permissions" },
@@ -140,33 +156,45 @@ exports.createRole = async (req, res) => {
       return res.status(403).json({ message: "Only CompanyAdmin or Member (with permission) can create roles" });
     }
 
-    const existingRole = await CustomRole.findOne({ name, tenant: tenantId });
-    if (existingRole) {
-      return res.status(400).json({ message: "Role already exists" });
-    }
-    // const validPermissions = await Permission.find({ _id: { $in: permissions } });
-    // if (validPermissions.length !== permissions.length) {
-    //   return res.status(400).json({ message: "Invalid permissions provided" });
-    // }
-    // Fetch permissions with their names
+    // Validate permissions
     const validPermissions = await Permission.find({ _id: { $in: permissions } });
     if (validPermissions.length !== permissions.length) {
       return res.status(400).json({ message: "Invalid permissions provided" });
     }
 
-    // Create permissions array with both _id and name
+    // Generate signature for unique (name + permissions) combo
+    const sorted = validPermissions.map(p => p._id.toString()).sort().join("_");
+    const permissionsSignature = crypto.createHash("md5").update(sorted).digest("hex");
+
+    // Check duplicate based on name + permissionsSignature
+    const existingRole = await CustomRole.findOne({ 
+      name, 
+      tenant: tenantId, 
+      permissionsSignature 
+    });
+
+    if (existingRole) {
+      return res.status(400).json({ message: "Role with same name and permissions already exists" });
+    }
+
+    // Create role
     const permissionsWithNames = validPermissions.map((perm) => ({
       _id: perm._id,
       name: perm.name,
     }));
+
     const role = await CustomRole.create({
       name,
       permissions: permissionsWithNames,
       description,
-      tenant: tenantId, // Changed from tenantId to tenant
+      tenant: tenantId,
       createdBy: req.user._id,
+      permissionsSignature,
     });
+
+    await role.populate("permissions", "name");
     res.status(201).json({ role });
+
   } catch (error) {
     console.error("Error creating role:", error);
     res.status(500).json({ message: "Failed to create role", error: error.message });
