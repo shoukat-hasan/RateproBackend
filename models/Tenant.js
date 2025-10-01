@@ -1,4 +1,4 @@
-// models/Tenant.js
+
 // const mongoose = require("mongoose");
 
 // const tenantSchema = new mongoose.Schema({
@@ -68,7 +68,7 @@
 // tenantSchema.index({ contactEmail: 1 });
 
 // module.exports = mongoose.model("Tenant", tenantSchema);
-
+// models/Tenant.js
 const mongoose = require('mongoose');
 
 const tenantSchema = new mongoose.Schema({
@@ -91,6 +91,8 @@ const tenantSchema = new mongoose.Schema({
       ref: "Department",
     }
   ],
+  products: [{ type: String }],
+  contacts: [{ phone: String, name: String, role: String }],
 }, { timestamps: true });
 
 module.exports = mongoose.model('Tenant', tenantSchema);

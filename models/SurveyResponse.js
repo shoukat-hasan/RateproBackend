@@ -5,6 +5,13 @@ const mongoose = require("mongoose");
 const answerSchema = new mongoose.Schema({
   questionId: { type: mongoose.Schema.Types.ObjectId, required: true },
   answer: mongoose.Schema.Types.Mixed, // string, number, etc.
+  media: [
+    {
+      type: { type: String, enum: ["image", "audio", "video", "file"] },
+      public_id: String,
+      url: String,
+    }
+  ]
 });
 
 const surveyResponseSchema = new mongoose.Schema(
@@ -24,6 +31,8 @@ const surveyResponseSchema = new mongoose.Schema(
     rating: { type: Number }, // 1–5
     submittedAt: { type: Date, default: Date.now },
 
+    tenant: { type: mongoose.Schema.Types.ObjectId, ref: 'Tenant', required: true },
+
     isAnonymous: { type: Boolean, default: false },
     ip: { type: String }, // for public + anonymous tracking
 
@@ -31,5 +40,7 @@ const surveyResponseSchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
+
+surveyResponseSchema.index({ tenant: 1, survey: 1 });
 
 module.exports = mongoose.model("SurveyResponse", surveyResponseSchema);

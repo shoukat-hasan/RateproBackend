@@ -1,3 +1,4 @@
+// models/CustomRole.js
 const mongoose = require('mongoose');
 const crypto = require("crypto");
 

@@ -7,6 +7,7 @@
 //   description: { type: String }
 // }, { timestamps: true });
 
+// models/Permission.js
 const mongoose = require('mongoose');
 
 const permissionSchema = new mongoose.Schema({

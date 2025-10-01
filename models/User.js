@@ -1,3 +1,4 @@
+// models/User.js
 const mongoose = require('mongoose');
 
 const userSchema = new mongoose.Schema({
@@ -93,14 +94,14 @@ const userSchema = new mongoose.Schema({
     },
   },
   // Link to SurveyStats (for users who take surveys)
-  // surveyStats: {
-  //   type: mongoose.Schema.Types.ObjectId,
-  //   // ref: "SurveyStats",
-  //   required: function () {
-  //     return this.role === "user";
-  //   },
-  //   default: null,
-  // },
+  surveyStats: {
+    type: mongoose.Schema.Types.ObjectId,
+    // ref: "SurveyStats",
+    required: function () {
+      return this.role === "user";
+    },
+    default: null,
+  },
   lastLogin: {
     type: Date,
     default: null,

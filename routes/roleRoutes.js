@@ -17,6 +17,7 @@
 // router.post("/remove/:userId", allowRoles("admin", "companyAdmin"), roleController.removeRoleFromUser);
 
 // module.exports = router;
+// routes/roleRoutes.js
 const express = require("express");
 const router = express.Router();
 const { protect } = require("../middlewares/authMiddleware");

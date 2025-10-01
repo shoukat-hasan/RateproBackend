@@ -32,6 +32,13 @@ const permissions = [
     { name: "survey:share", description: "Share surveys with others", group: "survey" },
     { name: "survey:settings:update", description: "Update survey settings", group: "survey" },
     { name: "survey:detail:view", description: "View survey details", group: "survey" },
+    { name: "survey:questions:create", description: "Create questions for a survey" },
+    { name: "survey:questions:delete", description: "Delete questions from a survey" },
+
+    { name: "feedback:analyze", description: "Analyze survey feedback", group: "feedback" },
+    { name: "action:generate", description: "Generate action lists", group: "action" },
+    { name: "feedback:follow-up", description: "Send follow-up notifications", group: "feedback" },
+    { name: "dashboard:view", description: "View executive and operational dashboards", group: "dashboard" },
     // Analytics Permissions
     { name: "analytics:view", description: "Access analytics overview dashboard", group: "analytics" },
     { name: "analytics:realtime", description: "View real-time survey results", group: "analytics" },

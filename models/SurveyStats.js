@@ -1,3 +1,4 @@
+// models/SurveyStats.js
 const mongoose = require('mongoose');
 
 const surveyStatsSchema = new mongoose.Schema({

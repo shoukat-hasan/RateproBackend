@@ -1,34 +1,11 @@
 // middleware/tenantMiddleware.js
-// exports.setTenantId = (req, res, next) => {
-//     // console.log('setTenantId: Processing request', {
-//     //   url: req.originalUrl,
-//     //   method: req.method,
-//     //   body: req.body,
-//     //   user: {
-//     //     id: req.user._id,
-//     //     role: req.user.role,
-//     //     tenant: req.user.tenant ? req.user.tenant._id?.toString() : null,
-//     //   },
-//     // });
 
-//     if (!req.user.tenant) {
-//       // console.log('setTenantId: No tenant found for user', { userId: req.user._id });
-//       return res.status(403).json({ message: 'Access denied: No tenant associated with this user' });
-//     }
-
-//     req.tenantId = req.user.tenant._id ? req.user.tenant._id.toString() : req.user.tenant.toString();
-//     // console.log('setTenantId: Set tenantId', { tenantId: req.tenantId });
-
-//     // Validate tenant in payload
-//     const { tenant } = req.body;
-//     if (req.user.role === 'companyAdmin' && tenant && tenant !== req.tenantId) {
-//       // console.log('setTenantId: Tenant mismatch', { providedTenant: tenant, userTenantId: req.tenantId });
-//       return res.status(403).json({ message: 'Access denied: Invalid tenant' });
-//     }
-
-//     next();
-//   };
 const User = require("../models/User");
+const asyncHandler = require('express-async-handler');
+const Survey = require('../models/Survey');
+const SurveyResponse = require('../models/SurveyResponse');
+const FeedbackAnalysis = require('../models/FeedbackAnalysis');
+const Action = require('../models/Action');
 
 exports.setTenantId = async (req, res, next) => {
   try {
@@ -65,3 +42,110 @@ exports.setTenantId = async (req, res, next) => {
     return res.status(500).json({ message: 'Internal Server Error' });
   }
 };
+
+exports.tenantCheck = asyncHandler(async (req, res, next) => {
+  const { id, surveyId, responseId, feedbackId, actionId } = req.params;
+  const tenantId = req.tenantId; // 👈 ek hi naam rakho
+  let resource;
+
+  console.log("tenantCheck: Checking resource with params", {
+    id,
+    surveyId,
+    responseId,
+    feedbackId,
+    actionId,
+    tenantId,
+  });
+
+  if (id || surveyId) {
+    console.log("tenantCheck: Fetching Survey", { id: id || surveyId });
+    resource = await Survey.findById(id || surveyId).select("tenant");
+  } else if (responseId) {
+    console.log("tenantCheck: Fetching SurveyResponse", { responseId });
+    resource = await SurveyResponse.findById(responseId).select("tenant");
+  } else if (feedbackId) {
+    console.log("tenantCheck: Fetching FeedbackAnalysis", { feedbackId });
+    resource = await FeedbackAnalysis.findById(feedbackId).select("tenant");
+  } else if (actionId) {
+    console.log("tenantCheck: Fetching Action", { actionId });
+    resource = await Action.findById(actionId).select("tenant");
+  }
+
+  console.log("tenantCheck: Resource fetched", {
+    resource: resource ? { id: resource._id, tenant: resource.tenant } : null,
+  });
+
+  // 🔹 List / Create case (jab resource nahi mila)
+  if (!resource) {
+    // For list/create operations, just verify the user has a valid tenant
+    if (!req.user?.tenant) {
+      console.error("tenantCheck: No tenant found for user");
+      return res.status(403).json({ message: "No tenant associated with user" });
+    }
+    return next();
+  }
+
+  // 🔹 Resource mila to tenant verify karo
+  if (resource.tenant.toString() !== tenantId) {
+    console.error("tenantCheck: Tenant mismatch or resource not found", {
+      resourceTenant: resource ? resource.tenant.toString() : null,
+      requestTenantId: tenantId,
+      resourceId: id || surveyId || responseId || feedbackId || actionId,
+    });
+    return res.status(403).json({ message: "Tenant mismatch" });
+  }
+
+  req.resource = resource;
+  console.log("tenantCheck: Tenant verified, proceeding", {
+    resourceId: resource._id,
+    tenantId,
+  });
+  next();
+});
+
+
+
+// exports.tenantCheck = asyncHandler(async (req, res, next) => {
+//   const { id, surveyId, responseId, feedbackId, actionId } = req.params;
+//   let resource;
+
+//   console.log('tenantCheck: Checking resource with params', { id, surveyId, responseId, feedbackId, actionId, tenantId: req.tenantId });
+
+//   if (id || surveyId) {
+//     console.log('tenantCheck: Fetching Survey', { id: id || surveyId });
+//     resource = await Survey.findById(id || surveyId).select('tenant');
+//   } else if (responseId) {
+//     console.log('tenantCheck: Fetching SurveyResponse', { responseId });
+//     resource = await SurveyResponse.findById(responseId).select('tenant');
+//   } else if (feedbackId) {
+//     console.log('tenantCheck: Fetching FeedbackAnalysis', { feedbackId });
+//     resource = await FeedbackAnalysis.findById(feedbackId).select('tenant');
+//   } else if (actionId) {
+//     console.log('tenantCheck: Fetching Action', { actionId });
+//     resource = await Action.findById(actionId).select('tenant');
+//   }
+
+//   console.log('tenantCheck: Resource fetched', { resource: resource ? { id: resource._id, tenant: resource.tenant } : null });
+
+//   if (!resource) {
+//     // List ya create case, bas tenantId match karo user ke saath
+//     if (req.user.tenant.toString() !== requestTenantId) {
+//       return res.status(403).json({ message: "Tenant mismatch" });
+//     }
+//     return next();
+//   }
+
+//   if (!resource || resource.tenant.toString() !== req.tenantId) {
+//     console.error('tenantCheck: Tenant mismatch or resource not found', {
+//       resourceTenant: resource ? resource.tenant.toString() : null,
+//       requestTenantId: req.tenantId,
+//       resourceId: id || surveyId || responseId || feedbackId || actionId,
+//     });
+//     res.status(403);
+//     throw new Error('Tenant mismatch');
+//   }
+
+//   req.resource = resource;
+//   console.log('tenantCheck: Tenant verified, proceeding', { resourceId: resource._id, tenantId: req.tenantId });
+//   next();
+// });

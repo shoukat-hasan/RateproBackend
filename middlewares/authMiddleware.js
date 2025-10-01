@@ -143,12 +143,7 @@ exports.protect = async (req, res, next) => {
 
     req.user = user;
     req.tenantId = user.tenant ? user.tenant._id.toString() : null;
-    // console.log('protect: req.user set', {
-    //   userId: user._id,
-    //   role: user.role,
-    //   tenantId: req.tenantId,
-    // });
-
+    
     next();
   } catch (err) {
     console.error('protect: Middleware error', { error: err.message, url: req.originalUrl });

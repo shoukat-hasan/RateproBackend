@@ -95,6 +95,7 @@
 // app.listen(PORT, () =>
 //   console.log(`🚀 Server running in ${process.env.NODE_ENV} mode on port ${PORT}`)
 // );
+// server.js
 require("dotenv").config();
 const express = require("express");
 const connectDB = require("./config/db");
@@ -161,6 +162,16 @@ app.use("/api/roles", require("./routes/roleRoutes"));
 app.use("/api/permissions", require("./routes/permissionRoutes.js"));
 app.use('/api', require("./routes/permissionAssignmentRoutes.js"));
 app.use("/api/surveys", require("./routes/surveyRoutes"));
+app.use("/api/ai", require("./routes/aiRoutes"));
+app.use("/api/actions", require("./routes/actionRoutes"));
+app.use("/api/analytics", require("./routes/analyticsRoutes"));
+app.use("/api/subscriptions", require("./routes/subscriptionRoutes"));
+app.use("/api/sms", require("./routes/smsRoutes"));
+app.use("/api/whatsapp", require("./routes/whatsappRoutes"));
+app.use("/api/insights", require("./routes/insightRoutes"));
+app.use("/api/feedback", require("./routes/feedbackRoutes"));
+app.use("/api/distribution", require("./routes/distributionRoutes"));
+app.use("/api/dashboard", require("./routes/dashboardRoutes"));
 
 // Error Handling Middleware
 const { notFound, errorHandler } = require("./middlewares/errorHandler");

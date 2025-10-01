@@ -1,3 +1,4 @@
+// /controllers/userController.js
 const mongoose = require("mongoose");
 const jwt = require("jsonwebtoken");
 const User = require("../models/User");
@@ -845,7 +846,7 @@ exports.exportUserDataPDF = async (req, res, next) => {
     const sectionBox = (title, draw) => {
       doc.moveDown(1);
       const startY = doc.y;
-      const paddingY = 15; 
+      const paddingY = 15;
 
       // Background rectangle
       doc.rect(40, startY - 10, doc.page.width - 80, 150).fill("#b6ebe0").stroke();
@@ -924,90 +925,6 @@ exports.sendNotification = async (req, res, next) => {
     next(err);
   }
 };
-
-// exports.updateMe = async (req, res, next) => {
-//   try {
-//     // ----------------- VALIDATION -----------------
-//     const { error } = updateMeSchema.validate(req.body);
-//     if (error) return res.status(400).json({ message: error.details[0].message });
-
-//     // ----------------- JWT VERIFY -----------------
-//     const token = req.cookies?.accessToken;
-//     if (!token) return res.status(401).json({ message: "No token provided" });
-
-//     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-//     const userId = decoded.id;
-
-//     // ----------------- FETCH USER -----------------
-//     const user = await User.findById(userId).populate("tenant");
-//     if (!user) return res.status(404).json({ message: "User not found" });
-
-//     // ----------------- UPDATE USER FIELDS -----------------
-//     const fieldsToUpdate = ["name", "email", "phone", "bio", "department"];
-//     fieldsToUpdate.forEach((field) => {
-//       if (req.body[field] !== undefined) user[field] = req.body[field];
-//     });
-
-//     // ----------------- TENANT/COMPANY UPDATE (only for companyAdmin) -----------------
-//     if (req.body.tenant && user.role === "companyAdmin") {
-//       let tenant = await Tenant.findById(user.tenant?._id);
-//       if (!tenant) return res.status(404).json({ message: "Tenant not found" });
-
-//       const tenantUpdates = req.body.tenant;
-//       Object.assign(tenant, {
-//         name: tenantUpdates.name ?? tenant.name,
-//         address: tenantUpdates.address ?? tenant.address,
-//         contactEmail: tenantUpdates.contactEmail ?? tenant.contactEmail,
-//         contactPhone: tenantUpdates.contactPhone ?? tenant.contactPhone,
-//         website: tenantUpdates.website ?? tenant.website,
-//         totalEmployees: tenantUpdates.totalEmployees ?? tenant.totalEmployees,
-//         departments: tenantUpdates.departments ?? tenant.departments,
-//       });
-//       await tenant.save();
-//     }
-
-//     // ----------------- AVATAR UPLOAD -----------------
-//     if (req.file) {
-//       if (user.avatar?.public_id) {
-//         await cloudinary.uploader.destroy(user.avatar.public_id);
-//       }
-
-//       const uploadResult = await cloudinary.uploader.upload(req.file.path, {
-//         folder: "avatars",
-//         width: 300,
-//         crop: "scale",
-//       });
-//       fs.unlinkSync(req.file.path);
-//       user.avatar = { public_id: uploadResult.public_id, url: uploadResult.secure_url };
-//     }
-
-//     await user.save();
-
-//     // ----------------- SAFE USER OBJECT -----------------
-//     const safeUser = {
-//       _id: user._id,
-//       name: user.name,
-//       email: user.email,
-//       phone: user.phone,
-//       bio: user.bio,
-//       role: user.role,
-//       customRoles: user.customRoles,
-//       authProvider: user.authProvider,
-//       isActive: user.isActive,
-//       isVerified: user.isVerified,
-//       tenant: user.tenant,
-//       department: user.department,
-//       avatar: user.avatar,
-//       createdAt: user.createdAt,
-//       updatedAt: user.updatedAt,
-//     };
-
-//     res.status(200).json({ message: "Profile updated successfully", user: safeUser });
-//   } catch (err) {
-//     console.error("updateMe error:", err);
-//     next(err);
-//   }
-// };
 
 exports.updateMe = async (req, res, next) => {
   try {
@@ -1116,3 +1033,89 @@ exports.updateMe = async (req, res, next) => {
     next(err);
   }
 };
+
+
+// exports.updateMe = async (req, res, next) => {
+//   try {
+//     // ----------------- VALIDATION -----------------
+//     const { error } = updateMeSchema.validate(req.body);
+//     if (error) return res.status(400).json({ message: error.details[0].message });
+
+//     // ----------------- JWT VERIFY -----------------
+//     const token = req.cookies?.accessToken;
+//     if (!token) return res.status(401).json({ message: "No token provided" });
+
+//     const decoded = jwt.verify(token, process.env.JWT_SECRET);
+//     const userId = decoded.id;
+
+//     // ----------------- FETCH USER -----------------
+//     const user = await User.findById(userId).populate("tenant");
+//     if (!user) return res.status(404).json({ message: "User not found" });
+
+//     // ----------------- UPDATE USER FIELDS -----------------
+//     const fieldsToUpdate = ["name", "email", "phone", "bio", "department"];
+//     fieldsToUpdate.forEach((field) => {
+//       if (req.body[field] !== undefined) user[field] = req.body[field];
+//     });
+
+//     // ----------------- TENANT/COMPANY UPDATE (only for companyAdmin) -----------------
+//     if (req.body.tenant && user.role === "companyAdmin") {
+//       let tenant = await Tenant.findById(user.tenant?._id);
+//       if (!tenant) return res.status(404).json({ message: "Tenant not found" });
+
+//       const tenantUpdates = req.body.tenant;
+//       Object.assign(tenant, {
+//         name: tenantUpdates.name ?? tenant.name,
+//         address: tenantUpdates.address ?? tenant.address,
+//         contactEmail: tenantUpdates.contactEmail ?? tenant.contactEmail,
+//         contactPhone: tenantUpdates.contactPhone ?? tenant.contactPhone,
+//         website: tenantUpdates.website ?? tenant.website,
+//         totalEmployees: tenantUpdates.totalEmployees ?? tenant.totalEmployees,
+//         departments: tenantUpdates.departments ?? tenant.departments,
+//       });
+//       await tenant.save();
+//     }
+
+//     // ----------------- AVATAR UPLOAD -----------------
+//     if (req.file) {
+//       if (user.avatar?.public_id) {
+//         await cloudinary.uploader.destroy(user.avatar.public_id);
+//       }
+
+//       const uploadResult = await cloudinary.uploader.upload(req.file.path, {
+//         folder: "avatars",
+//         width: 300,
+//         crop: "scale",
+//       });
+//       fs.unlinkSync(req.file.path);
+//       user.avatar = { public_id: uploadResult.public_id, url: uploadResult.secure_url };
+//     }
+
+//     await user.save();
+
+//     // ----------------- SAFE USER OBJECT -----------------
+//     const safeUser = {
+//       _id: user._id,
+//       name: user.name,
+//       email: user.email,
+//       phone: user.phone,
+//       bio: user.bio,
+//       role: user.role,
+//       customRoles: user.customRoles,
+//       authProvider: user.authProvider,
+//       isActive: user.isActive,
+//       isVerified: user.isVerified,
+//       tenant: user.tenant,
+//       department: user.department,
+//       avatar: user.avatar,
+//       createdAt: user.createdAt,
+//       updatedAt: user.updatedAt,
+//     };
+
+//     res.status(200).json({ message: "Profile updated successfully", user: safeUser });
+//   } catch (err) {
+//     console.error("updateMe error:", err);
+//     next(err);
+//   }
+// };
+
