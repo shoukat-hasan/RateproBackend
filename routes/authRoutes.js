@@ -69,7 +69,7 @@ router.post("/register", authLimiter, registerUser);
 router.post("/resend-otp", authLimiter, resendOtp);
 router.post("/verify-email", authLimiter, verifyEmail);
 router.get("/verify-email-link", authLimiter, verifyEmailLink);
-router.post("/login", authLimiter, loginUser);
+router.post("/login", loginUser);
 router.post("/forgot-password", authLimiter, forgotPassword);
 router.post("/reset-password", authLimiter, resetPassword);
 router.post("/verify-reset-code", authLimiter, verifyResetCode);

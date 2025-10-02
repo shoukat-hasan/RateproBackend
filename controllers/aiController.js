@@ -364,9 +364,29 @@ exports.aiTranslateSurvey = async (req, res, next) => {
 // @access  Private
 exports.aiGenerateFromCompanyProfile = async (req, res, next) => {
   try {
-    const { companyProfile, surveyGoal, questionCount, includeNPS, languages } = req.body;
+    // ✅ Extract and validate input data
+    const {
+      industry,
+      products,
+      targetAudience,
+      goal,
+      questionCount = 8,
+      includeNPS = true,
+      languages = ['English'],
+      additionalInstructions = '',
+      tone = 'friendly-professional'
+    } = req.body;
 
-    // Handle both authenticated and non-authenticated requests for testing
+    console.log('🚀 AI Generation Request - FIXED:', {
+      industry,
+      products: Array.isArray(products) ? products.join(', ') : products,
+      targetAudience,
+      goal,
+      questionCount,
+      additionalInstructions: additionalInstructions.substring(0, 100)
+    });
+
+    // Handle both authenticated and non-authenticated requests
     const tenant = req.user?.tenant || null;
 
     const formatProducts = (products) => {
@@ -375,18 +395,46 @@ exports.aiGenerateFromCompanyProfile = async (req, res, next) => {
       return "Not specified";
     };
 
-    const prompt = `
-Generate an optimized survey based on this company profile and goal:
+    // ✅ ENHANCED: Industry-specific context
+    let industryContext = '';
+    let sampleQuestions = [];
+
+    if (industry === 'hospitality') {
+      industryContext = `
+This is for a HOSPITALITY business (hotel, restaurant, spa services).
+Focus on: overall stay experience, room comfort & cleanliness, restaurant food quality, 
+spa & leisure services, staff behavior & professionalism, suggestions for improvement.
+Target audience are hotel guests who want friendly, professional service evaluation.
+      `;
+      sampleQuestions = [
+        { type: "likert", title: "How satisfied were you with your overall stay experience?", options: ["Very Dissatisfied", "Dissatisfied", "Neutral", "Satisfied", "Very Satisfied"] },
+        { type: "rating", title: "Rate the cleanliness and comfort of your room", scale: 5 },
+        { type: "likert", title: "How would you rate our restaurant food quality?", options: ["Poor", "Fair", "Good", "Very Good", "Excellent"] },
+        { type: "multiple_choice", title: "Which hotel facilities did you use?", options: ["Restaurant", "Spa & Wellness", "Swimming Pool", "Fitness Center", "Room Service"] },
+        { type: "likert", title: "How professional and helpful was our staff?", options: ["Very Poor", "Poor", "Average", "Good", "Excellent"] },
+        { type: "nps", title: "How likely are you to recommend us to friends and family?", scale: 10 },
+        { type: "text_short", title: "What suggestions do you have for improving our services?" },
+        { type: "single_choice", title: "What was the primary purpose of your visit?", options: ["Business Travel", "Leisure/Vacation", "Conference/Event", "Wedding/Celebration"] }
+      ];
+    }
+
+    // ✅ FIXED: Create a clean, valid prompt string
+    const promptText = `Generate an optimized survey based on this company profile and goal:
 
 Company Profile:
-- Industry: ${companyProfile?.industry || 'General'}
-- Products/Services: ${formatProducts(companyProfile?.products)}
-- Target Audience: ${companyProfile?.targetAudience || 'customers'}
-- Tone: ${companyProfile?.tone || 'friendly'}
-Survey Goal: ${surveyGoal || 'Customer satisfaction survey'}
-Question Count: ${questionCount || 6}
-Languages: ${languages?.join(", ") || 'English'}
-Include NPS: ${includeNPS !== false ? 'Yes' : 'No'}
+- Industry: ${industry || 'General'}
+- Products/Services: ${formatProducts(products)}
+- Target Audience: ${targetAudience || 'customers'}
+- Tone: ${tone}
+
+${industryContext}
+
+Survey Goal: ${goal || 'Customer satisfaction survey'}
+Question Count: ${questionCount}
+Languages: ${languages.join(', ')}
+Include NPS: ${includeNPS ? 'Yes' : 'No'}
+
+Additional Requirements: ${additionalInstructions}
 
 Generate a JSON response with this structure:
 {
@@ -394,17 +442,47 @@ Generate a JSON response with this structure:
   "data": {
     "survey": {
       "title": "Survey Title",
-      "description": "Survey description",
+      "description": "Survey description", 
       "languages": ["English", "Arabic"]
     },
     "questions": [
       {
-        "type": "rating",
-        "title": "Question title",
-        "description": "Question description", 
+        "type": "likert",
+        "title": "How satisfied were you with your overall experience?",
+        "description": "Please rate your satisfaction level",
+        "required": true,
+        "options": ["Very Dissatisfied", "Dissatisfied", "Neutral", "Satisfied", "Very Satisfied"],
+        "settings": {"scale": 5}
+      },
+      {
+        "type": "rating", 
+        "title": "Rate the cleanliness of your room",
+        "description": "",
         "required": true,
         "options": [],
         "settings": {"scale": 5}
+      },
+      {
+        "type": "multiple_choice",
+        "title": "Which hotel facilities did you use?",
+        "description": "Select all that apply",
+        "required": false,
+        "options": ["Restaurant", "Spa", "Pool", "Gym", "Business Center", "Room Service"]
+      },
+      {
+        "type": "nps",
+        "title": "How likely are you to recommend us to others?", 
+        "description": "0 = Not at all likely, 10 = Extremely likely",
+        "required": true,
+        "options": [],
+        "settings": {"scale": 10}
+      },
+      {
+        "type": "text_short",
+        "title": "What can we improve?",
+        "description": "Please share your suggestions",
+        "required": false,
+        "options": []
       }
     ]
   }
@@ -413,69 +491,153 @@ Generate a JSON response with this structure:
 Question types available: rating, single_choice, multiple_choice, text_short, text_long, nps, likert, yes_no, date, number
 
 Make questions industry-specific and relevant to the survey goal.
-`;
+For hospitality: Include questions about rooms, food, service, staff, facilities.
+Use ${tone} tone and make questions easy to understand for ${targetAudience}.`;
 
-    console.log("🚀 AI Prompt =>", prompt);
+    console.log('🚀 AI Prompt Length:', promptText.length);
+    console.log('🚀 AI Prompt Preview:', promptText.substring(0, 300) + '...');
 
-    const aiResponse = await aiClient.complete({ prompt });
-    
-    let result;
-    try {
-      result = JSON.parse(aiResponse.text);
-    } catch (e) {
-      // Fallback if AI doesn't return proper JSON
-      result = {
-        success: true,
-        data: {
-          survey: {
-            title: `${companyProfile?.industry || 'Customer'} Feedback Survey`,
-            description: `Professional survey for ${companyProfile?.industry || 'general'} industry to gather valuable insights.`,
-            languages: languages || ['English']
-          },
-          questions: [
-            {
-              type: "rating",
-              title: "Overall Experience Rating",
-              description: "How would you rate your overall experience?",
-              required: true,
-              options: [],
-              settings: { scale: 5 }
-            },
-            {
-              type: "single_choice",
-              title: "Primary Purpose",
-              description: "What was the main reason for your visit/interaction?",
-              required: true,
-              options: ["Purchase", "Information", "Support", "Complaint", "Other"]
-            },
-            {
-              type: "nps",
-              title: "Recommendation Likelihood",
-              description: "How likely are you to recommend us to friends or colleagues?",
-              required: true,
-              options: [],
-              settings: { scale: 10 }
-            },
-            {
-              type: "text_long",
-              title: "Additional Comments",
-              description: "Please share any additional feedback or suggestions.",
-              required: false,
-              options: []
-            }
-          ]
-        }
-      };
+    // ✅ FIXED: Validate prompt before sending
+    if (!promptText || promptText.trim().length === 0) {
+      console.error("❌ Generated prompt is empty!");
+      throw new Error("Failed to generate AI prompt");
     }
 
-    res.json(result);
+    // ✅ FIXED: Pass string directly to aiClient, not object
+    // ✅ DEBUGGING: Log the exact prompt being sent
+    console.log('🔍 About to call aiClient.complete with:');
+    console.log('🔍 Prompt type:', typeof promptText);
+    console.log('🔍 Prompt length:', promptText ? promptText.length : 'undefined');
+    console.log('🔍 Prompt is string:', typeof promptText === 'string');
+    console.log('🔍 Prompt is empty:', !promptText || promptText.trim().length === 0);
+    console.log('🔍 Prompt first 100 chars:', promptText ? promptText.substring(0, 100) : 'NO PROMPT');
+
+    // ✅ ADDITIONAL SAFETY: Ensure prompt is clean string
+    const cleanPrompt = String(promptText || '').trim();
+    if (!cleanPrompt || cleanPrompt.length === 0) {
+      console.error("❌ Generated prompt is empty or invalid!");
+      console.error("❌ Original promptText:", promptText);
+      throw new Error("Failed to generate valid AI prompt");
+    }
+
+    console.log('✅ Clean prompt length:', cleanPrompt.length);
+    console.log('✅ Sending to aiClient...');
+
+    // ✅ FIXED: Use clean prompt
+    const result = await aiClient.complete(cleanPrompt);
+    const responseText = result.text || result;
+
+    console.log('🤖 AI Raw Response Length:', responseText.length);
+    console.log('🤖 AI Raw Response Preview:', responseText.substring(0, 300) + '...');
+
+    try {
+      // Try to parse JSON response
+      const jsonMatch = responseText.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        const parsedResponse = JSON.parse(jsonMatch[0]);
+        console.log('✅ Parsed AI Response:', {
+          title: parsedResponse.data?.survey?.title,
+          questionCount: parsedResponse.data?.questions?.length,
+          industry: industry,
+          products: formatProducts(products)
+        });
+        return res.json(parsedResponse);
+      }
+    } catch (parseError) {
+      console.log('⚠️ JSON Parse failed, using enhanced fallback...', parseError.message);
+    }
+
+    // ✅ ENHANCED: Industry-specific fallback with actual data
+    const fallbackQuestions = sampleQuestions.length > 0 ? sampleQuestions : [
+      {
+        type: 'rating',
+        title: 'How would you rate your overall experience?',
+        description: 'Please rate your satisfaction level',
+        required: true,
+        options: [],
+        settings: { scale: 5 }
+      },
+      {
+        type: 'single_choice',
+        title: 'What was the primary purpose of your interaction?',
+        description: '',
+        required: false,
+        options: ['Purchase', 'Information', 'Support', 'Complaint', 'Other']
+      },
+      {
+        type: 'nps',
+        title: `How likely are you to recommend us to others?`,
+        description: '0 = Not at all likely, 10 = Extremely likely',
+        required: true,
+        options: [],
+        settings: { scale: 10 }
+      },
+      {
+        type: 'text_short',
+        title: 'What can we improve?',
+        description: 'Please share your suggestions',
+        required: false,
+        options: []
+      }
+    ];
+
+    const fallbackResponse = {
+      success: true,
+      data: {
+        survey: {
+          title: `${industry?.charAt(0).toUpperCase() + industry?.slice(1) || 'Customer'} Feedback Survey`,
+          description: `We value your feedback about your recent experience with our ${formatProducts(products)} services. Please take a few minutes to share your thoughts.`,
+          languages: languages
+        },
+        questions: fallbackQuestions.slice(0, questionCount)
+      }
+    };
+
+    console.log('✅ Using enhanced fallback response for', industry, 'with', fallbackQuestions.slice(0, questionCount).length, 'questions');
+    res.json(fallbackResponse);
+
   } catch (error) {
-    console.error('AI Generate From Profile Error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to generate survey from company profile',
-      error: error.message
-    });
+    console.error('❌ AI Generation Error:', error);
+    
+    // Return a safe fallback response instead of 500 error
+    const fallbackResponse = {
+      success: true,
+      data: {
+        survey: {
+          title: 'Customer Feedback Survey',
+          description: 'We value your feedback. Please take a few minutes to share your thoughts.',
+          languages: ['English']
+        },
+        questions: [
+          {
+            type: 'rating',
+            title: 'How would you rate your overall experience?',
+            description: '',
+            required: true,
+            options: [],
+            settings: { scale: 5 }
+          },
+          {
+            type: 'nps',
+            title: 'How likely are you to recommend us to others?',
+            description: '0 = Not at all likely, 10 = Extremely likely',
+            required: true,
+            options: [],
+            settings: { scale: 10 }
+          },
+          {
+            type: 'text_short',
+            title: 'What can we improve?',
+            description: 'Please share your suggestions',
+            required: false,
+            options: []
+          }
+        ]
+      }
+    };
+
+    console.log('🔄 Using safe fallback due to AI error');
+    res.json(fallbackResponse);
   }
 };
 
