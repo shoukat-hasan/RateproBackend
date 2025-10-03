@@ -62,6 +62,7 @@ const {
   logoutUser,
   getMe,
   loginUser,
+  refreshAccessToken,
 } = require("../controllers/authController");
 
 // Public routes with rate limiting
@@ -78,5 +79,5 @@ router.post("/verify-reset-code", authLimiter, verifyResetCode);
 router.put("/update-profile", protect, allowRoles("admin", "companyAdmin", "member", "user"), upload.single("avatar"), updateProfile);
 router.post("/logout", protect, logoutUser);
 router.get("/me", protect, allowRoles("admin", "companyAdmin", "member", "user"), getMe);
-
+router.post("/refresh", refreshAccessToken);
 module.exports = router;

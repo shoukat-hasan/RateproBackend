@@ -525,3 +525,29 @@ exports.logoutUser = async (req, res) => {
 
     res.status(200).json({ message: "Logged out" });
 };
+
+exports.refreshAccessToken = async (req, res) => {
+    try {
+        const refreshToken = req.cookies.refreshToken;
+
+        if (!refreshToken) return res.status(401).json({ message: "No refresh token provided" });
+
+        // Verify refresh token
+        const decoded = jwt.verify(refreshToken, process.env.REFRESH_TOKEN_SECRET);
+        const user = await User.findById(decoded.id);
+
+        if (!user) return res.status(401).json({ message: "User not found" });
+
+        // Generate new access token
+        const accessToken = jwt.sign(
+            { id: user._id, email: user.email, role: user.role },
+            JWT_SECRET,
+            { expiresIn: "15m" } // Access token short-lived
+        );
+
+        res.json({ accessToken, user: { _id: user._id, name: user.name, email: user.email, role: user.role } });
+    } catch (err) {
+        console.error("refreshAccessToken error:", err);
+        return res.status(401).json({ message: "Invalid refresh token" });
+    }
+};
