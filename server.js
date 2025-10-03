@@ -108,13 +108,7 @@ const seedPermissions = require("./seeds/seedPermissions");
 console.log('🔍 Environment check:');
 console.log('NODE_ENV:', process.env.NODE_ENV);
 console.log('PORT:', process.env.PORT);
-console.log('MONGO_URI exists:', !!process.env.MONGO_URI);
 
-// Ensure required env vars exist
-if (!process.env.MONGO_URI) {
-  console.error('❌ MONGO_URI is missing from environment variables');
-  process.exit(1);
-}
 // MongoDB connection and seeding
 const startServer = async () => {
   try {
