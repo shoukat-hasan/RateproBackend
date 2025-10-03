@@ -61,57 +61,24 @@ app.use(globalLimiter);
 // Static folder for uploads (avatars, PDFs, etc.)
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 
-// Add this BEFORE your routes section in server.js
-const debugRoutes = (routePath, routeFile) => {
-  try {
-    console.log(`✅ Loading route: ${routePath}`);
-    const router = require(routeFile);
-    return router;
-  } catch (error) {
-    console.error(`❌ Error loading route ${routePath}:`, error.message);
-    // Return empty router to prevent crash
-    const express = require('express');
-    return express.Router();
-  }
-};
-
-// Then replace your routes with:
-app.use("/api/auth", debugRoutes("/api/auth", "./routes/authRoutes"));
-app.use("/api/users", debugRoutes("/api/users", "./routes/userRoutes"));
-app.use('/api/tenants', debugRoutes("/api/tenants", "./routes/tenantRoutes"));
-app.use("/api/roles", debugRoutes("/api/roles", "./routes/roleRoutes"));
-app.use("/api/permissions", debugRoutes("/api/permissions", "./routes/permissionRoutes"));
-app.use('/api', debugRoutes("/api", "./routes/permissionAssignmentRoutes"));
-app.use("/api/surveys", debugRoutes("/api/surveys", "./routes/surveyRoutes"));
-app.use("/api/ai", debugRoutes("/api/ai", "./routes/aiRoutes"));
-app.use("/api/actions", debugRoutes("/api/actions", "./routes/actionRoutes"));
-app.use("/api/analytics", debugRoutes("/api/analytics", "./routes/analyticsRoutes"));
-app.use("/api/subscriptions", debugRoutes("/api/subscriptions", "./routes/subscriptionRoutes"));
-app.use("/api/sms", debugRoutes("/api/sms", "./routes/smsRoutes"));
-app.use("/api/whatsapp", debugRoutes("/api/whatsapp", "./routes/whatsappRoutes"));
-app.use("/api/insights", debugRoutes("/api/insights", "./routes/insightRoutes"));
-app.use("/api/feedback", debugRoutes("/api/feedback", "./routes/feedbackRoutes"));
-app.use("/api/distribution", debugRoutes("/api/distribution", "./routes/distributionRoutes"));
-app.use("/api/dashboard", debugRoutes("/api/dashboard", "./routes/dashboardRoutes"));
-
 // // Routes
-// app.use("/api/auth", require("./routes/authRoutes"));
-// app.use("/api/users", require("./routes/userRoutes"));
-// app.use('/api/tenants', require("./routes/tenantRoutes"));
-// app.use("/api/roles", require("./routes/roleRoutes"));
-// app.use("/api/permissions", require("./routes/permissionRoutes.js"));
-// app.use('/api', require("./routes/permissionAssignmentRoutes.js"));
-// app.use("/api/surveys", require("./routes/surveyRoutes"));
-// app.use("/api/ai", require("./routes/aiRoutes"));
-// app.use("/api/actions", require("./routes/actionRoutes"));
-// app.use("/api/analytics", require("./routes/analyticsRoutes"));
-// app.use("/api/subscriptions", require("./routes/subscriptionRoutes"));
-// app.use("/api/sms", require("./routes/smsRoutes"));
-// app.use("/api/whatsapp", require("./routes/whatsappRoutes"));
-// app.use("/api/insights", require("./routes/insightRoutes"));
-// app.use("/api/feedback", require("./routes/feedbackRoutes"));
-// app.use("/api/distribution", require("./routes/distributionRoutes"));
-// app.use("/api/dashboard", require("./routes/dashboardRoutes"));
+app.use("/api/auth", require("./routes/authRoutes"));
+app.use("/api/users", require("./routes/userRoutes"));
+app.use('/api/tenants', require("./routes/tenantRoutes"));
+app.use("/api/roles", require("./routes/roleRoutes"));
+app.use("/api/permissions", require("./routes/permissionRoutes.js"));
+app.use('/api', require("./routes/permissionAssignmentRoutes.js"));
+app.use("/api/surveys", require("./routes/surveyRoutes"));
+app.use("/api/ai", require("./routes/aiRoutes"));
+app.use("/api/actions", require("./routes/actionRoutes"));
+app.use("/api/analytics", require("./routes/analyticsRoutes"));
+app.use("/api/subscriptions", require("./routes/subscriptionRoutes"));
+app.use("/api/sms", require("./routes/smsRoutes"));
+app.use("/api/whatsapp", require("./routes/whatsappRoutes"));
+app.use("/api/insights", require("./routes/insightRoutes"));
+app.use("/api/feedback", require("./routes/feedbackRoutes"));
+app.use("/api/distribution", require("./routes/distributionRoutes"));
+app.use("/api/dashboard", require("./routes/dashboardRoutes"));
 
 // Error Handling Middleware
 const { notFound, errorHandler } = require("./middlewares/errorHandler");
