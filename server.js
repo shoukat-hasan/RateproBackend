@@ -35,6 +35,7 @@ const allowedOrigins = [
   process.env.ADMIN_URL_LOCAL || "http://localhost:5174",
   process.env.PUBLIC_URL_PROD || "https://ratepro-public.vercel.app",
   process.env.ADMIN_URL_PROD || "https://rate-pro-admin.vercel.app",
+  'http://192.168.0.4:5173/'
 ];
 
 // Middleware

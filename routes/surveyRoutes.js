@@ -11,6 +11,7 @@ const {
   getAllSurveys,
   getSurveyById,
   getPublicSurveys,
+  getPublicSurveyById,
   submitSurvey,
   updateSurvey,
   deleteSurvey,
@@ -52,6 +53,7 @@ router.get("/dashboards/operational", tenantCheck, allowRoles("companyAdmin"), a
 
 // Public routes
 router.get("/public/all", getPublicSurveys);
+router.get("/public/:id", getPublicSurveyById);
 router.post("/public/submit", submitSurvey);
 router.post("/kiosk/:id", protect, tenantCheck, allowRoles("companyAdmin"), submitSurvey);
 

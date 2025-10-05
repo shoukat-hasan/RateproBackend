@@ -62,7 +62,7 @@ const surveySchema = new mongoose.Schema(
       password: { type: String }, // will be hashed
     },
 
-    status: { type: String, enum: ["active", "inactive"], default: "active" },
+    status: { type: String, enum: ["active", "inactive", "draft"], default: "active" },
 
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
 
