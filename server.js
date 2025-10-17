@@ -8,10 +8,6 @@ const path = require("path");
 const { globalLimiter } = require("./middlewares/rateLimiter");
 const seedPermissions = require("./seeds/seedPermissions");
 
-console.log('🔍 Environment check:');
-console.log('NODE_ENV:', process.env.NODE_ENV);
-console.log('PORT:', process.env.PORT);
-
 // MongoDB connection and seeding
 const startServer = async () => {
   try {
@@ -33,7 +29,7 @@ app.set("trust proxy", 1);
 const allowedOrigins = [
   process.env.PUBLIC_URL_LOCAL || "http://localhost:5173",
   process.env.ADMIN_URL_LOCAL || "http://localhost:5174",
-  process.env.PUBLIC_URL_PROD || "https://ratepro-public.vercel.app",
+  process.env.PUBLIC_URL_PROD || "https://rate-pro-public.vercel.app",
   process.env.ADMIN_URL_PROD || "https://rate-pro-admin-six.vercel.app",
   'http://192.168.0.4:5173/'
 ];

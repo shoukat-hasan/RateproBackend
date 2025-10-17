@@ -359,27 +359,69 @@ exports.getAllSurveys = async (req, res, next) => {
 // ===== GET PUBLIC SURVEYS (for users) =====
 exports.getPublicSurveys = async (req, res, next) => {
     try {
-        const surveys = await Survey.find({
-            "settings.isPublic": true,
-            status: "active",
-            deleted: false,
-        }).select("title description category createdAt themeColor questions estimatedTime averageRating language")
-          .lean();
+    const { 
+      category, 
+      page = 1, 
+      limit = 12, 
+      sort = "-createdAt",
+      language 
+    } = req.query;
+    
+    const skip = (page - 1) * limit;
 
-        // Add calculated fields for frontend display
-        const surveysWithStats = surveys.map(survey => ({
-            ...survey,
-            responses: Math.floor(Math.random() * 500) + 50, // Mock data for now
-            averageRating: survey.averageRating || (Math.random() * 2 + 3), // 3-5 rating
-            estimatedTime: survey.estimatedTime || `${Math.ceil(survey.questions?.length * 0.5 || 5)}-${Math.ceil(survey.questions?.length * 0.8 || 7)} minutes`,
-            language: survey.language || ['English'],
-            status: 'active'
-        }));
+    const query = {
+      "settings.isPublic": true,
+      status: "active",
+      deleted: false,
+    };
 
-        res.status(200).json(surveysWithStats);
-    } catch (err) {
-        next(err);
+    if (category && category !== 'all') {
+      query.category = category;
     }
+
+    if (language && language !== 'all') {
+      query.language = { $in: [language, 'en', 'ar'] };
+    }
+
+    const total = await Survey.countDocuments(query);
+    const surveys = await Survey.find(query)
+      .populate("tenant", "name") // ✅ Company name populate karen
+      .select("title description category createdAt themeColor questions estimatedTime averageRating language settings.totalResponses tenant")
+      .sort(sort)
+      .skip(skip)
+      .limit(parseInt(limit))
+      .lean();
+
+    // Format for public display with company name
+    const publicSurveys = surveys.map(survey => ({
+      _id: survey._id,
+      title: survey.title,
+      description: survey.description,
+      category: survey.category,
+      createdAt: survey.createdAt,
+      themeColor: survey.themeColor,
+      averageRating: survey.averageRating || (Math.random() * 2 + 3).toFixed(1),
+      estimatedTime: survey.estimatedTime || `${Math.ceil(survey.questions?.length * 0.5 || 5)}-${Math.ceil(survey.questions?.length * 0.8 || 7)} minutes`,
+      totalResponses: survey.settings?.totalResponses || Math.floor(Math.random() * 500) + 50,
+      language: survey.language || ['English'],
+      isPublic: true,
+      isPasswordProtected: survey.settings?.isPasswordProtected || false,
+      questionCount: survey.questions?.length || 0,
+      // ✅ Company name include karen
+      companyName: survey.tenant?.name || 'Unknown Company',
+      tenant: survey.tenant?._id
+    }));
+
+    res.status(200).json({ 
+      total, 
+      page: parseInt(page), 
+      limit: parseInt(limit),
+      totalPages: Math.ceil(total / limit),
+      surveys: publicSurveys 
+    });
+  } catch (err) {
+    next(err);
+  }
 };
 
 // ===== GET PUBLIC SURVEY BY ID (for taking surveys) =====
@@ -418,67 +460,91 @@ exports.getSurveyById = async (req, res, next) => {
 
 // ===== TAKE SURVEY / SUBMIT RESPONSE =====
 exports.submitSurvey = async (req, res, next) => {
-    try {
-        const { surveyId, answers, review, score, rating, deviceId } = req.body;
-        const ip = req.ip;
-        const userId = req.user?._id;
+  try {
+    console.log('📥 Incoming survey submission body:', req.body);
+    console.log('📡 IP Address:', req.ip);
+    console.log('👤 Auth User:', req.user?._id || 'Anonymous');
 
-        const survey = await Survey.findById(surveyId);
-        if (!survey || survey.deleted) return res.status(404).json({ message: "Survey not found" });
+    const { surveyId, answers, review, score, rating, deviceId } = req.body;
 
-        // Block double submission
-        const exists = await SurveyResponse.findOne({
-            survey: surveyId,
-            $or: [{ user: userId }, { ip }],
-        });
-        if (exists) return res.status(400).json({ message: "You already submitted this survey" });
-
-        const response = new SurveyResponse({
-            survey: surveyId,
-            user: survey.settings?.isAnonymous ? null : userId,
-            answers,
-            review,
-            score,
-            rating,
-            isAnonymous: survey.settings?.isAnonymous || false,
-            ip,
-            deviceId: deviceId,
-        });
-
-        await response.save();
-
-        // Update stats
-        const allResponses = await SurveyResponse.find({ survey: surveyId });
-        const total = allResponses.length;
-        const avgScore = allResponses.reduce((sum, r) => sum + (r.score || 0), 0) / total;
-        const avgRating = allResponses.reduce((sum, r) => sum + (r.rating || 0), 0) / total;
-
-        survey.totalResponses = total;
-        survey.averageScore = Math.round(avgScore || 0);
-        survey.averageRating = Math.round(avgRating || 0);
-        await survey.save();
-
-        // ✅ Smart Logic Runtime Evaluation
-        let nextQuestionId = null;
-        if (answers && answers.length > 0) {
-            const lastAnswer = answers[answers.length - 1];
-            const currentQ = survey.questions.find(
-                (q) => q._id === lastAnswer.questionId
-            );
-
-            if (currentQ) {
-                nextQuestionId = getNextQuestion(lastAnswer.answer, currentQ);
-            }
-        }
-
-        // ✅ AUTO ACTION GENERATION FROM FEEDBACK (Flow.md Section 7)
-        await generateActionsFromResponse(response, survey, req.tenantId);
-
-        res.status(201).json({ message: "Survey submitted", response, nextQuestionId });
-    } catch (err) {
-        next(err);
+    // 🧠 STEP 1: Survey check
+    console.log('🔍 Looking for survey with ID:', surveyId);
+    const survey = await Survey.findById(surveyId);
+    if (!survey) {
+      console.log('❌ Survey not found in DB for ID:', surveyId);
+      return res.status(404).json({ message: 'Survey not found' });
     }
+    if (survey.deleted) {
+      console.log('🚫 Survey is marked as deleted:', surveyId);
+      return res.status(404).json({ message: 'Survey not found (deleted)' });
+    }
+    console.log('✅ Survey found:', survey.title);
+
+    // 🧠 STEP 2: Duplicate submission check
+    const exists = await SurveyResponse.findOne({
+      survey: surveyId,
+      $or: [{ user: req.user?._id }, { ip: req.ip }],
+    });
+    if (exists) {
+      console.log('⚠️ Duplicate submission detected for survey:', surveyId);
+      return res.status(400).json({ message: 'You already submitted this survey' });
+    }
+
+    // 🧠 STEP 3: Create new response
+    console.log('📝 Creating survey response...');
+    const response = new SurveyResponse({
+      survey: surveyId,
+      user: survey.settings?.isAnonymous ? null : req.user?._id,
+      answers,
+      review,
+      score,
+      rating,
+      isAnonymous: survey.settings?.isAnonymous || false,
+      ip: req.ip,
+      deviceId,
+      tenant: survey.tenant, 
+    });
+
+    await response.save();
+    console.log('✅ Survey response saved with ID:', response._id);
+
+    // 🧠 STEP 4: Update stats
+    const allResponses = await SurveyResponse.find({ survey: surveyId });
+    const total = allResponses.length;
+    const avgScore = allResponses.reduce((sum, r) => sum + (r.score || 0), 0) / total;
+    const avgRating = allResponses.reduce((sum, r) => sum + (r.rating || 0), 0) / total;
+
+    survey.totalResponses = total;
+    survey.averageScore = Math.round(avgScore || 0);
+    survey.averageRating = Math.round(avgRating || 0);
+    await survey.save();
+    console.log('📊 Updated survey stats:', { total, avgScore, avgRating });
+
+    // 🧠 STEP 5: Next Question Logic
+    let nextQuestionId = null;
+    if (answers && answers.length > 0) {
+      const lastAnswer = answers[answers.length - 1];
+      const currentQ = survey.questions.find(q => q._id.toString() === lastAnswer.questionId);
+      console.log('🧭 Last Answer:', lastAnswer);
+      console.log('🔎 Current Question Found:', currentQ ? currentQ._id : 'Not Found');
+
+      if (currentQ) {
+        nextQuestionId = getNextQuestion(lastAnswer.answer, currentQ);
+        console.log('➡️ Next Question ID:', nextQuestionId);
+      }
+    }
+
+    // 🧠 STEP 6: Trigger Actions
+    await generateActionsFromResponse(response, survey, req.tenantId);
+    console.log('🤖 Actions generated successfully');
+
+    res.status(201).json({ message: 'Survey submitted', response, nextQuestionId });
+  } catch (err) {
+    console.error('💥 Submission Controller Error:', err);
+    next(err);
+  }
 };
+
 
 // ===== UPDATE SURVEY =====
 exports.updateSurvey = async (req, res, next) => {
@@ -588,34 +654,6 @@ exports.updateSurvey = async (req, res, next) => {
         next(err);
     }
 };
-// exports.updateSurvey = async (req, res, next) => {
-//     try {
-//         const survey = await Survey.findById({
-//             _id: req.params.id,
-//             tenant: req.user.tenant,
-//         });
-//         if (!survey) return res.status(404).json({ message: "Survey not found" });
-
-//         Object.assign(survey, req.body);
-
-//         // New logo?
-//         if (req.file) {
-//             if (survey.logo?.public_id) await cloudinary.uploader.destroy(survey.logo.public_id);
-//             const result = await cloudinary.uploader.upload(req.file.path, { folder: "survey-logos" });
-//             survey.logo = { public_id: result.public_id, url: result.secure_url };
-//         }
-
-//         // Password update → hash it
-//         if (survey.settings?.isPasswordProtected && req.body.settings?.password) {
-//             survey.settings.password = await bcrypt.hash(req.body.settings.password, 10);
-//         }
-
-//         await survey.save();
-//         res.status(200).json({ message: "Survey updated", survey });
-//     } catch (err) {
-//         next(err);
-//     }
-// };
 
 // ===== DELETE SURVEY =====
 exports.deleteSurvey = async (req, res, next) => {
@@ -806,33 +844,6 @@ exports.getSurveyResponses = async (req, res, next) => {
         next(err);
     }
 };
-
-// exports.getSurveyResponses = async (req, res, next) => {
-//     try {
-//         const { surveyId } = req.params;
-//         const { page = 1, limit = 10, minRating, maxRating, startDate, endDate } = req.query;
-
-//         const query = { survey: surveyId };
-//         if (minRating) query.rating = { ...query.rating, $gte: Number(minRating) };
-//         if (maxRating) query.rating = { ...query.rating, $lte: Number(maxRating) };
-//         if (startDate || endDate) {
-//             query.createdAt = {};
-//             if (startDate) query.createdAt.$gte = new Date(startDate);
-//             if (endDate) query.createdAt.$lte = new Date(endDate);
-//         }
-
-//         const total = await SurveyResponse.countDocuments(query);
-//         const responses = await SurveyResponse.find(query)
-//             .populate("user", "name email")
-//             .sort("-createdAt")
-//             .skip((page - 1) * limit)
-//             .limit(parseInt(limit));
-
-//         res.status(200).json({ total, page, limit, responses });
-//     } catch (err) {
-//         next(err);
-//     }
-// }
 
 // ===== GET SURVEY ANALYTICS =====
 exports.getSurveyAnalytics = async (req, res, next) => {

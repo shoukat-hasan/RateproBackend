@@ -20,8 +20,6 @@ const {
   exportSurveyReport,
   getSurveyResponses,
   getSurveyAnalytics,
-  createQuestion,
-  deleteQuestion
 } = require("../controllers/surveyController");
 const {
   analyzeFeedback,
@@ -33,8 +31,13 @@ const {
   getOperationalDashboard
 } = require("../controllers/dashboardController");
 
+// Public routes
+router.get("/public/all", getPublicSurveys);
+router.get("/public/:id", getPublicSurveyById);
+router.post("/public/submit", submitSurvey);
+
 // Protected routes
-router.use(protect, allowRoles("companyAdmin", "admin"));
+router.use(protect);
 router.post("/create", allowRoles("companyAdmin"), allowPermission('survey:create'), upload.single("logo"), createSurvey);
 router.get("/", tenantCheck, allowRoles("companyAdmin"), allowPermission('survey:read'), getAllSurveys);
 router.get("/:id", tenantCheck, allowRoles("companyAdmin"), allowPermission('survey:detail:view'), getSurveyById);
@@ -51,10 +54,6 @@ router.post("/feedback/follow-up", tenantCheck, allowRoles("companyAdmin"), allo
 router.get("/dashboards/executive", tenantCheck, allowRoles("companyAdmin"), allowPermission('dashboard:view'), getExecutiveDashboard);
 router.get("/dashboards/operational", tenantCheck, allowRoles("companyAdmin"), allowPermission('dashboard:view'), getOperationalDashboard);
 
-// Public routes
-router.get("/public/all", getPublicSurveys);
-router.get("/public/:id", getPublicSurveyById);
-router.post("/public/submit", submitSurvey);
-router.post("/kiosk/:id", protect, tenantCheck, allowRoles("companyAdmin"), submitSurvey);
+// router.post("/kiosk/:id", protect, tenantCheck, allowRoles("companyAdmin"), submitSurvey);
 
 module.exports = router;
