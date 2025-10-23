@@ -8,7 +8,7 @@ const questionSchema = new mongoose.Schema({
   type: {
     type: String,
     enum: ["text", "textarea", "numeric", "email", "radio", "checkbox", "select", "imageChoice", "ranking", "matrix",
-      "likert", "scale", "nps", "rating", "yesno", "date", "time", "datetime",
+      "likert", "scale", "nps", "rating", "yesno", "date", "time", "datetime", "multiple_choice",
     ],
     required: true,
   },

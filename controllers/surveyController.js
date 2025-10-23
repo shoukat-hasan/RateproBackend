@@ -17,23 +17,18 @@ const aiClient = require("../utils/aiClient");
 // ===== CREATE SURVEY =====
 exports.createSurvey = async (req, res, next) => {
     try {
-        let {
-            title, description, category,
-            questions, settings, themeColor
-        } = req.body;
+        let { title, description, category, questions, settings, themeColor } = req.body;
 
-        // Parse JSON fields (if coming as string from FormData)
-        if (typeof questions === "string") {
-            questions = JSON.parse(questions);
-        }
-        if (typeof settings === "string") {
-            settings = JSON.parse(settings);
-        }
+        // Parse JSON fields
+        if (typeof questions === "string") questions = JSON.parse(questions);
+        if (typeof settings === "string") settings = JSON.parse(settings);
 
+        // Normalize questions
         const normalizedQuestions = (questions || []).map(q => ({
             ...q,
             id: q.id,
         }));
+
         const newSurvey = new Survey({
             title,
             description,
@@ -42,27 +37,25 @@ exports.createSurvey = async (req, res, next) => {
             settings,
             themeColor,
             createdBy: req.user._id,
-            tenant: req.tenantId, // Add tenant field
+            tenant: req.tenantId,
         });
 
-        // Logo upload
+        // Handle logo upload
         if (req.file) {
-            const result = await cloudinary.uploader.upload(req.file.path, {
-                folder: "survey-logos",
-            });
-            newSurvey.logo = {
-                url: result.secure_url,
-                public_id: result.public_id,
-            };
-            // Delete local file
+            const result = await cloudinary.uploader.upload(req.file.path, { folder: "survey-logos" });
+            newSurvey.logo = { url: result.secure_url, public_id: result.public_id };
             fs.unlinkSync(req.file.path);
         }
 
-        await newSurvey.save();
-        res.status(201).json({ message: "Survey created successfully", survey: newSurvey });
+        // Secure password hashing
+        if (settings?.isPasswordProtected && settings.password) {
+            newSurvey.settings.password = await bcrypt.hash(String(settings.password), 10);
+        }
+
+        const savedSurvey = await newSurvey.save();
+        res.status(201).json({ message: "Survey created successfully", survey: savedSurvey });
     } catch (err) {
-        // Clean up uploaded file on error
-        if (req.file) {
+        if (req.file && fs.existsSync(req.file.path)) {
             fs.unlinkSync(req.file.path);
         }
         next(err);
@@ -270,90 +263,46 @@ const notifyManagersOfUrgentAction = async (action, tenantId) => {
     }
 };
 
-// ===== UPDATE SURVEY =====
-exports.updateSurvey = async (req, res, next) => {
-    try {
-        let {
-            title, description, category,
-            questions, settings, themeColor
-        } = req.body;
-
-        // Parse JSON fields (if coming as string from FormData)
-        if (typeof questions === "string") {
-            questions = JSON.parse(questions);
-        }
-        if (typeof settings === "string") {
-            settings = JSON.parse(settings);
-        }
-
-        const normalizedQuestions = (questions || []).map(q => ({
-            ...q,
-            id: q.id,
-        }));
-        const newSurvey = new Survey({
-            title,
-            description,
-            category,
-            questions: normalizedQuestions,
-            settings,
-            themeColor,
-            createdBy: req.user._id,
-            tenant: req.tenantId, // Add tenant field
-        });
-
-        // Logo upload
-        if (req.file) {
-            const result = await cloudinary.uploader.upload(req.file.path, {
-                folder: "survey-logos",
-            });
-            newSurvey.logo = {
-                public_id: result.public_id,
-                url: result.secure_url,
-            };
-        }
-
-        // Password hash
-        if (settings?.isPasswordProtected && settings.password) {
-            const hashed = await bcrypt.hash(settings.password, 10);
-            newSurvey.settings.password = hashed;
-        }
-
-        const saved = await newSurvey.save();
-        res.status(201).json({ message: "Survey created", survey: saved });
-    } catch (err) {
-        next(err);
-    }
-};
-
 // ===== GET ALL SURVEYS (with filters) =====
 exports.getAllSurveys = async (req, res, next) => {
-    try {
-        const { search = "", status, page = 1, limit = 10, sort = "-createdAt" } = req.query;
-        const skip = (page - 1) * limit;
+  try {
+    const { search = "", status, page = 1, limit = 10, sort = "-createdAt" } = req.query;
+    const skip = (page - 1) * limit;
 
-        const query = {
-            deleted: false,
-            title: { $regex: search, $options: "i" },
-            tenant: req.user.tenant,
-        };
+    // 🟢 Step 2: Base query
+    const query = {
+      deleted: false,
+      title: { $regex: search, $options: "i" },
+    };
 
-        if (status) query.status = status;
-
-        if (req.user?.role === "company") {
-            query.createdBy = req.user._id;
-        }
-
-        const total = await Survey.countDocuments(query);
-        const surveys = await Survey.find(query)
-            .populate("createdBy", "name email role")
-            .sort(sort)
-            .skip(skip)
-            .limit(parseInt(limit));
-
-        res.status(200).json({ total, page, surveys });
-    } catch (err) {
-        next(err);
+    // 🟢 Step 3: Role-based tenant logic
+    if (req.user?.role === "admin") {
+    } else if (req.user?.tenant) {
+      query.tenant = req.user.tenant; 
+    } else {
+      return res.status(403).json({ message: "Access denied: No tenant associated with this user" });
     }
+
+    if (status) {
+      query.status = status;
+    }
+
+    if (req.user?.role === "companyAdmin") {
+      query.createdBy = req.user._id;
+    }
+
+    const total = await Survey.countDocuments(query);
+    const surveys = await Survey.find(query)
+      .populate("createdBy", "name email role")
+      .sort(sort)
+      .skip(skip)
+      .limit(parseInt(limit));
+    
+    res.status(200).json({ total, page, surveys });
+  } catch (err) {
+    console.error("❌ Error in getAllSurveys:", err);
+    next(err);
+  }
 };
 
 // ===== GET PUBLIC SURVEYS (for users) =====
@@ -544,7 +493,6 @@ exports.submitSurvey = async (req, res, next) => {
     next(err);
   }
 };
-
 
 // ===== UPDATE SURVEY =====
 exports.updateSurvey = async (req, res, next) => {

@@ -12,7 +12,8 @@ const seedPermissions = require("./seeds/seedPermissions");
 const startServer = async () => {
   try {
     await connectDB();
-    await seedPermissions(); // Run permission seeding after DB connection
+    // await seedSurveyTemplates();
+    // await seedPermissions(); // Run permission seeding after DB connection
   } catch (err) {
     console.error("Server startup error:", err);
     process.exit(1);
@@ -45,7 +46,7 @@ app.use(
       }
     },
     credentials: true,
-    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"], // ✅ moved here
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"], // ✅ moved here
   })
 );
 
@@ -66,6 +67,7 @@ app.use("/api/roles", require("./routes/roleRoutes"));
 app.use("/api/permissions", require("./routes/permissionRoutes.js"));
 app.use('/api', require("./routes/permissionAssignmentRoutes.js"));
 app.use("/api/surveys", require("./routes/surveyRoutes"));
+app.use("/api/survey-templates", require("./routes/surveyTemplatesRoutes"));
 app.use("/api/ai", require("./routes/aiRoutes"));
 app.use("/api/actions", require("./routes/actionRoutes"));
 app.use("/api/analytics", require("./routes/analyticsRoutes"));
@@ -79,6 +81,7 @@ app.use("/api/dashboard", require("./routes/dashboardRoutes"));
 
 // Error Handling Middleware
 const { notFound, errorHandler } = require("./middlewares/errorHandler");
+const seedSurveyTemplates = require("./seeds/seedSurveyTemplates.js");
 app.use(notFound);
 app.use(errorHandler);
 

@@ -329,7 +329,7 @@ exports.loginUser = async (req, res, next) => {
             httpOnly: true,
             secure: process.env.NODE_ENV === "production",
             sameSite: process.env.NODE_ENV === "production" ? "None" : "Lax",
-            maxAge: 7 * 24 * 60 * 60 * 1000,
+            maxAge: 30 * 60 * 60 * 1000,
         });
 
         user.lastLogin = Date.now();
