@@ -63,6 +63,11 @@ const surveyTemplateSchema = new mongoose.Schema({
     type: String,
     required: true
   },
+  status: {
+    type: String,
+    enum: ['draft', 'published'],
+    default: 'draft'
+  },
   language: {
     type: [String],
     default: ['English']

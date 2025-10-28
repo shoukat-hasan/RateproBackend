@@ -1,8 +1,12 @@
-// /routes/surveyTemplatesRoutes.js
+// routes/surveyTemplatesRoutes.js
 const express = require("express");
 const router = express.Router();
-const { protect } = require("../middlewares/authMiddleware.js");
-const { allowRoles } = require("../middlewares/roleMiddleware.js");
+const { upload } = require("../middlewares/multer");
+const { protect } = require("../middlewares/authMiddleware");
+const { allowRoles } = require("../middlewares/roleMiddleware");
+const { allowPermission } = require("../middlewares/permissionMiddleware");
+const {} = require("../middlewares/tenantMiddleware");
+
 const {
   getAllSurveyTemplates,
   getSurveyTemplateById,
@@ -11,46 +15,44 @@ const {
   deleteSurveyTemplate,
   useSurveyTemplate,
   previewSurveyTemplate,
-  seedSurveyTemplates,
-} = require("../controllers/surveyTemplatesController.js");
+  updateTemplateStatus,
+  saveDraftTemplate,
+} = require("../controllers/surveyTemplatesController");
 
-// 🧩 Set tenantId middleware (like userRoutes)
+// 🟢 PUBLIC ROUTES (if any in the future)
+// Example: router.get("/public/all", getPublicTemplates);
+
+// 🟡 PROTECTED ROUTES
+router.use(protect);
+
+// 🧩 Set Tenant ID (same as surveyRoutes)
 const setTenantId = (req, res, next) => {
-  // ✅ Skip tenant check for Admin users
-  if (req.user.role === "admin") {
-    console.log("setTenantId: Admin user detected, skipping tenant validation");
-    return next();
-  }
-
-  // 🔒 Ensure user has tenant
+  if (req.user.role === "admin") return next();
   if (!req.user.tenant) {
-    console.error("setTenantId: No tenant found for user", { userId: req.user._id });
-    return res.status(403).json({ message: "Access denied: No tenant associated with this user" });
+    return res
+      .status(403)
+      .json({ message: "Access denied: No tenant associated with this user" });
   }
-
-  // ✅ Set tenantId
   req.tenantId = req.user.tenant._id
     ? req.user.tenant._id.toString()
     : req.user.tenant.toString();
-  console.log("setTenantId: Set tenantId", { tenantId: req.tenantId });
   next();
 };
 
-// 🧠 Public routes (if any in future)
-// e.g. router.get("/public", getPublicTemplates);
+// Apply tenant check after authentication
+router.use(setTenantId);
 
-// 🧩 Protected routes
-router.use(protect, setTenantId);
+// 🧠 ADMIN & COMPANY ADMIN ROUTES
+router.post("/create", allowRoles("admin"), allowPermission("template:create"), upload.single("thumbnail"), createSurveyTemplate);
+router.put("/:id", allowRoles("admin"), allowPermission("template:update"), upload.single("thumbnail"), updateSurveyTemplate);
+router.delete("/:id", allowRoles("admin"), allowPermission("template:delete"), deleteSurveyTemplate);
+router.patch("/:id/status", allowRoles("admin"), allowPermission("template:update"), updateTemplateStatus);
+router.get("/", allowRoles("admin", "companyAdmin", "member"), allowPermission("template:read"), getAllSurveyTemplates);
+router.get("/:id", allowRoles("admin", "companyAdmin", "member"), allowPermission("template:detail:view"), getSurveyTemplateById);
+// 🔁 Template Usage & Preview
+router.patch("/:id/use", allowRoles("admin", "companyAdmin", "member"), allowPermission("template:use"), useSurveyTemplate);
+router.get("/:id/preview", allowRoles("admin", "companyAdmin", "member"), allowPermission("template:preview"), previewSurveyTemplate);
 
-// 📋 Survey Template Management Routes
-router.get("/", allowRoles("admin", "companyAdmin", "member"), getAllSurveyTemplates);
-router.get("/:id", allowRoles("admin", "companyAdmin", "member"), getSurveyTemplateById);
-router.post("/", allowRoles("admin"), createSurveyTemplate); // Only admin can create
-router.put("/:id", allowRoles("admin"), updateSurveyTemplate);
-router.delete("/:id", allowRoles("admin"), deleteSurveyTemplate);
-
-// 🔁 Template Usage / Preview Routes
-router.patch("/:id/use", allowRoles("companyAdmin", "admin"), useSurveyTemplate);
-router.get("/:id/preview", allowRoles("admin", "companyAdmin", "member"), previewSurveyTemplate);
+router.post("/save-from-survey", allowRoles("admin"), saveDraftTemplate);
 
 module.exports = router;

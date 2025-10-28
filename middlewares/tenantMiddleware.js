@@ -53,21 +53,8 @@
 //   const { id, surveyId, responseId, feedbackId, actionId } = req.params;
 //   const tenantId = req.tenantId; // 👈 ek hi naam rakho
 //   let resource;
-
-//   console.log("tenantCheck: Checking resource with params", {
-//     id,
-//     surveyId,
-//     responseId,
-//     feedbackId,
-//     actionId,
-//     tenantId,
-//   });
   
-//     // ✅ Skip tenant validation for admins
-//   if (req.user.role === "admin") {
-//     console.log("tenantCheck: Admin user detected, skipping tenant validation");
-//     return next();
-//   }
+
 
 //   if (id || surveyId) {
 //     console.log("tenantCheck: Fetching Survey", { id: id || surveyId });
@@ -180,18 +167,9 @@ exports.tenantCheck = asyncHandler(async (req, res, next) => {
   const tenantId = req.tenantId;
   let resource;
 
-  console.log("tenantCheck: Checking resource with params", {
-    id,
-    surveyId,
-    responseId,
-    feedbackId,
-    actionId,
-    tenantId,
-  });
-
   // ✅ Skip tenant validation for admins
   if (req.user.role === "admin") {
-    console.log("tenantCheck: Admin user detected, skipping tenant validation");
+    // console.log("tenantCheck: Admin user detected, skipping tenant validation");
     return next();
   }
 

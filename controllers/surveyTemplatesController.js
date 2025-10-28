@@ -11,6 +11,7 @@ exports.getAllSurveyTemplates = async (req, res) => {
       category,
       language,
       search,
+      status, // ✅ NEW: Status filter
       sortBy = 'popular',
       page = 1,
       limit = 12
@@ -18,6 +19,15 @@ exports.getAllSurveyTemplates = async (req, res) => {
 
     // Build filter object
     let filter = { isActive: true };
+    
+    // ✅ NEW: Role-based status filtering
+    // Non-admin users only see published templates
+    if (req.user.role !== 'admin') {
+      filter.status = 'published';
+    } else if (status && status !== 'all') {
+      // Admin can filter by specific status
+      filter.status = status;
+    }
     
     if (category && category !== 'all') {
       filter.category = category;
@@ -127,7 +137,8 @@ exports.createSurveyTemplate = async (req, res) => {
       estimatedTime,
       language,
       tags,
-      isPremium
+      isPremium,
+      status = 'draft' // ✅ NEW: Default to draft
     } = req.body;
 
     // Check if template with same name already exists
@@ -152,6 +163,7 @@ exports.createSurveyTemplate = async (req, res) => {
       language: language || ['English'],
       tags: tags || [],
       isPremium: isPremium || false,
+      status: status, // ✅ NEW: Include status
       createdBy: req.user.id
     });
 
@@ -160,7 +172,7 @@ exports.createSurveyTemplate = async (req, res) => {
 
     res.status(201).json({
       success: true,
-      message: 'Survey template created successfully',
+      message: `Survey template created as ${status} successfully`,
       data: savedTemplate
     });
   } catch (error) {
@@ -193,7 +205,8 @@ exports.updateSurveyTemplate = async (req, res) => {
       language,
       tags,
       isPremium,
-      isActive
+      isActive,
+      status // ✅ NEW: Status update
     } = req.body;
 
     // Check if template exists
@@ -232,6 +245,7 @@ exports.updateSurveyTemplate = async (req, res) => {
       ...(tags && { tags }),
       ...(isPremium !== undefined && { isPremium }),
       ...(isActive !== undefined && { isActive }),
+      ...(status && { status }), // ✅ NEW: Include status
       updatedAt: Date.now()
     };
 
@@ -355,4 +369,157 @@ exports.previewSurveyTemplate = async (req, res) => {
       message: 'Server error while previewing template'
     });
   }
+};
+
+// @desc    Publish template
+// @route   PATCH /api/survey-templates/:id/publish
+// @access  Private (Admin only)
+exports.publishTemplate = async (req, res) => {
+  try {
+    const template = await surveyTemplates.findById(req.params.id);
+
+    if (!template) {
+      return res.status(404).json({
+        success: false,
+        message: 'Template not found'
+      });
+    }
+
+    template.status = 'published';
+    template.updatedAt = Date.now();
+    
+    await template.save();
+
+    res.json({
+      success: true,
+      message: 'Template published successfully',
+      data: template
+    });
+  } catch (error) {
+    console.error('Publish template error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error while publishing template'
+    });
+  }
+};
+
+// @desc    Update template status
+// @route   PATCH /api/survey-templates/:id/status
+// @access  Private (Admin only)
+exports.updateTemplateStatus = async (req, res) => {
+  try {
+    const { status } = req.body;
+    
+    const template = await surveyTemplates.findById(req.params.id);
+
+    if (!template) {
+      return res.status(404).json({
+        success: false,
+        message: 'Template not found'
+      });
+    }
+
+    template.status = status;
+    template.updatedAt = Date.now();
+    
+    await template.save();
+
+    res.json({
+      success: true,
+      message: `Template status updated to ${status} successfully`,
+      data: template
+    });
+  } catch (error) {
+    console.error('Update template status error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error while updating template status'
+    });
+  }
+};
+
+// @desc    Save survey as template (draft)
+// @route   POST /api/surveys/save-as-template
+// @access  Private (Admin only)
+exports.saveDraftTemplate = async (req, res) => {
+  try {
+    const { 
+      name, 
+      description, 
+      category, 
+      questions, 
+      estimatedTime,
+      status = 'draft'
+    } = req.body;
+
+    // ✅ FIX: Use correct model name - surveyTemplates (not SurveyTemplate)
+    const existingTemplate = await surveyTemplates.findOne({ 
+      name: { $regex: new RegExp(`^${name}$`, 'i') } 
+    });
+
+    if (existingTemplate) {
+      return res.status(400).json({
+        success: false,
+        message: 'A template with this name already exists'
+      });
+    }
+
+    // ✅ FIX: Use correct model
+    const template = new surveyTemplates({
+      name,
+      description,
+      category,
+      categoryName: getCategoryName(category),
+      questions: questions.map(q => ({
+        questionText: q.title || q.questionText,
+        type: q.type,
+        options: q.options || [],
+        required: q.required || false,
+        description: q.description || '',
+        logicRules: q.logicRules || []
+      })),
+      estimatedTime: estimatedTime || `${Math.ceil(questions.length * 0.5)} min`,
+      status: status,
+      isActive: true,
+      usageCount: 0,
+      rating: 5.0,
+      isPremium: false,
+      createdBy: req.user._id
+    });
+
+    const savedTemplate = await template.save();
+    await savedTemplate.populate('createdBy', 'name email');
+
+    res.status(201).json({
+      success: true,
+      message: `Template saved as ${status} successfully`,
+      data: savedTemplate
+    });
+  } catch (error) {
+    console.error('Save template error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error while saving template'
+    });
+  }
+};
+
+// Helper function to get category name
+const getCategoryName = (categoryId) => {
+  const categories = {
+    'corporate': 'Corporate / HR',
+    'education': 'Education',
+    'healthcare': 'Healthcare',
+    'hospitality': 'Hospitality & Tourism',
+    'sports': 'Sports & Entertainment',
+    'banking': 'Banking & Financial',
+    'retail': 'Retail & E-Commerce',
+    'government': 'Government & Public',
+    'construction': 'Construction & Real Estate',
+    'automotive': 'Automotive & Transport',
+    'technology': 'Technology & Digital'
+  };
+  
+  return categories[categoryId] || 'General';
 };

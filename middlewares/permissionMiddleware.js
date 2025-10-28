@@ -6,16 +6,9 @@ const Permission = require('../models/Permission');
 
 exports.allowPermission = (permission) => async (req, res, next) => {
   try {
-    console.log('allowPermission: Checking permission', {
-      permission,
-      userId: req.user._id,
-      role: req.user.role,
-      tenant: req.user.tenant ? req.user.tenant._id?.toString() : null,
-    });
 
-    // Allow companyAdmin to bypass permission check
-    if (req.user.role === 'companyAdmin') {
-      console.log('allowPermission: companyAdmin role, bypassing permission check', { userId: req.user._id });
+    // ✅ Allow admin and companyAdmin to bypass permission check
+    if (req.user.role === 'admin' || req.user.role === 'companyAdmin') {
       return next();
     }
 
