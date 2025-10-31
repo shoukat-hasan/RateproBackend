@@ -12,53 +12,6 @@ const sendSchema = Joi.object({
   viaTenantDefault: Joi.boolean().optional().default(true), // use tenant settings if recipients not provided
 });
 
-// exports.sendSurveyWhatsApp = async (req, res, next) => {
-//   try {
-//     const { error, value } = sendSchema.validate(req.body);
-//     if (error) return res.status(400).json({ message: error.details[0].message });
-    
-//     const { surveyId, recipients, messageTemplate, viaTenantDefault } = value;
-//     const survey = await Survey.findById(surveyId);
-//     if (!survey || survey.deleted) return res.status(404).json({ message: 'Survey not found' });
-
-//     // Compose link (frontend route)
-//     const link = `${process.env.FRONTEND_URL}/take-survey/${survey._id}`;
-//     const defaultMsg = messageTemplate || `Please take this quick survey: ${link}`;
-
-//     // Determine recipients
-//     let toList = recipients || [];
-
-//     if ((!toList || toList.length === 0) && viaTenantDefault) {
-//       // try tenant contacts (you may implement tenant contacts later). For now, return error
-//       return res.status(400).json({ message: 'No recipients provided. Provide recipients or implement tenant contact list.' });
-//     }
-
-//     // Fetch tenant-specific WhatsApp config
-//     const waSetting = await WhatsAppSetting.findOne({ tenant: req.tenantId, isActive: true });
-//     const config = waSetting ? {
-//       provider: waSetting.provider,
-//       twilio: waSetting.twilio,
-//       meta: waSetting.meta,
-//     } : null;
-
-//     // Bulk send (sequential to avoid rate-limit; can be parallelized with queue)
-//     const results = [];
-//     for (const to of toList) {
-//       try {
-//         const body = defaultMsg;
-//         const sendRes = await sendWhatsApp({ to, body, config });
-//         results.push({ to, success: true, resp: sendRes });
-//       } catch (err) {
-//         results.push({ to, success: false, error: err.message });
-//       }
-//     }
-
-//     res.status(200).json({ message: 'Send attempted', results });
-//   } catch (err) {
-//     next(err);
-//   }
-// };
-
 exports.sendSurveyWhatsApp = async (req, res, next) => {
   try {
     const { error, value } = sendSchema.validate(req.body);

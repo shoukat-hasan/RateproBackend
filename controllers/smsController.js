@@ -1,3 +1,4 @@
+// controllers/smsController.js
 const { sendSMS } = require("../utils/sendSMS");
 
 exports.sendSMSHandler = async (req, res, next) => {

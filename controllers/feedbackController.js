@@ -8,6 +8,7 @@ const aiClient = require("../utils/aiClient");
 const sendEmail = require("../utils/sendEmail");
 const sendSMS = require("../utils/sendSMS"); // optional helper to implement
 const Joi = require("joi");
+const { generateActionsFromFeedback } = require("./actionController")
 
 // analyzeFeedback: analyze one or multiple responses (can be called on-demand or from webhook)
 const analyzeSchema = Joi.object({
@@ -15,74 +16,198 @@ const analyzeSchema = Joi.object({
   runAllUnanalyzed: Joi.boolean().optional().default(false),
 });
 
-exports.analyzeFeedback = async (req, res, next) => {
-  try {
-    const { error, value } = analyzeSchema.validate(req.body);
-    if (error) return res.status(400).json({ message: error.details[0].message });
+// exports.analyzeFeedbackLogic = async (options, tenantId) => {
+//   try {
+//     const { responseIds, runAllUnanalyzed } = options;
+//     let responses = [];
 
+//     if (runAllUnanalyzed) {
+//       responses = await SurveyResponse.find({ tenant: tenantId }).lean();
+//     } else if (responseIds?.length) {
+//       responses = await SurveyResponse.find({ _id: { $in: responseIds }, tenant: tenantId }).lean();
+//     } else {
+//       throw new Error("Provide responseIds or set runAllUnanalyzed=true");
+//     }
+
+//     const analyses = [];
+
+//     for (const resp of responses) {
+//       const existing = await FeedbackAnalysis.findOne({ response: resp._id });
+//       if (existing) {
+//         analyses.push({ responseId: resp._id, status: "skipped", reason: "already analyzed" });
+//         continue;
+//       }
+
+//       const text = resp.review || (resp.answers || []).map(a => a.answer).join(" ");
+//       const prompt = `Analyze sentiment (positive/negative/neutral) and top categories (max 3) for this feedback. Return JSON: { sentiment: "...", categories: ["..."] }\n\nFeedback: ${text}`;
+
+//       let aiResult;
+//       try {
+//         aiResult = await aiClient.complete({ prompt, maxTokens: 200 });
+//       } catch {
+//         aiResult = { text: null };
+//       }
+
+//       const aiText = aiResult?.text || aiResult?.choices?.[0]?.message?.content || "";
+//       let sentiment = "neutral";
+//       let categories = [];
+
+//       try {
+//         if (aiText) {
+//           const parsed = JSON.parse(aiText);
+//           sentiment = parsed.sentiment || sentiment;
+//           categories = parsed.categories || [];
+//         } else {
+//           sentiment = naiveSentiment(text);
+//         }
+//       } catch {
+//         sentiment = naiveSentiment(text);
+//       }
+
+//       const fa = await FeedbackAnalysis.create({
+//         response: resp._id,
+//         sentiment,
+//         categories,
+//         tenant: tenantId,
+//       });
+
+//       analyses.push({ responseId: resp._id, status: "analyzed", analysis: fa });
+
+//       if (fa.sentiment === "negative") {
+//         await generateActionsFromFeedback({ feedbackIds: [fa._id] });
+//         await sendNotification({ type: "negative_feedback", feedbackId: fa._id });
+//       } else if (fa.sentiment === "positive") {
+//         await sendSurveyWhatsApp({ feedbackId: fa._id, messageType: "thank_you" });
+//       }
+//     }
+
+//     return analyses;
+//   } catch (err) {
+//     console.error("Error in analyzeFeedbackLogic:", err);
+//     return { success: false, error: err.message };
+//   }
+// };
+
+// helper
+exports.analyzeFeedbackLogic = async (options, tenantId) => {
+  console.log("🧠 Entering analyzeFeedbackLogic...");
+  console.log("🧠 Options:", options);
+  console.log("🏢 Tenant ID:", tenantId);
+
+  try {
+    const { responseIds, runAllUnanalyzed } = options;
     let responses = [];
-    if (value.runAllUnanalyzed) {
-      responses = await SurveyResponse.find({ tenant: req.tenantId }).lean();
-    } else if (value.responseIds && value.responseIds.length) {
-      responses = await SurveyResponse.find({ _id: { $in: value.responseIds }, tenant: req.tenantId }).lean();
+
+    if (runAllUnanalyzed) {
+      console.log("🔄 Running for all unanalyzed responses...");
+      responses = await SurveyResponse.find({ tenant: tenantId }).lean();
+      console.log("📊 Found responses:", responses.length);
+    } else if (responseIds?.length) {
+      console.log("🔍 Fetching specific responses...");
+      responses = await SurveyResponse.find({ _id: { $in: responseIds }, tenant: tenantId }).lean();
+      console.log("📊 Found responses:", responses.length);
     } else {
-      return res.status(400).json({ message: "Provide responseIds or runAllUnanalyzed=true" });
+      const errMsg = "Provide responseIds or set runAllUnanalyzed=true";
+      console.error("❌ Invalid options:", errMsg);
+      throw new Error(errMsg);
     }
 
     const analyses = [];
     for (const resp of responses) {
-      // Simple guard: skip if already analyzed
+      console.log("🔍 Processing response ID:", resp._id);
       const existing = await FeedbackAnalysis.findOne({ response: resp._id });
       if (existing) {
+        console.log("⚠️ Skipped (already analyzed):", resp._id);
         analyses.push({ responseId: resp._id, status: "skipped", reason: "already analyzed" });
         continue;
       }
 
-      // Build prompt for sentiment + categories
       const text = resp.review || (resp.answers || []).map(a => a.answer).join(" ");
-      const prompt = `Analyze sentiment (positive/negative/neutral) and top categories (max 3) for this feedback. Return JSON: { sentiment: "...", categories: ["..."] }\n\nFeedback: ${text}`;
+      console.log("📝 Feedback Text:", text.substring(0, 100) + "..."); // Truncate for log
+
+      const prompt = `Analyze sentiment... Feedback: ${text}`;
+      console.log("🤖 Sending AI prompt...");
 
       let aiResult;
       try {
         aiResult = await aiClient.complete({ prompt, maxTokens: 200 });
+        console.log("✅ AI Response:", aiResult.text?.substring(0, 100) + "...");
       } catch (err) {
-        // fallback naive sentiment
+        console.error("💥 AI Error:", err.message);
         aiResult = { text: null };
       }
 
+      const aiText = aiResult?.text || aiResult?.choices?.[0]?.message?.content || "";
       let sentiment = "neutral";
       let categories = [];
-      if (aiResult.text) {
-        try {
-          const parsed = JSON.parse(aiResult.text);
+
+      try {
+        if (aiText) {
+          const parsed = JSON.parse(aiText);
           sentiment = parsed.sentiment || sentiment;
           categories = parsed.categories || [];
-        } catch (e) {
-          // fallback simple keywords
-          const lower = (text || "").toLowerCase();
-          if (/(bad|poor|terrible|awful|disappoint)/.test(lower)) sentiment = "negative";
-          else if (/(good|great|excellent|love|awesome)/.test(lower)) sentiment = "positive";
-          categories = [];
+          console.log("✅ Parsed Sentiment:", sentiment);
+          console.log("✅ Categories:", categories);
+        } else {
+          sentiment = naiveSentiment(text);
+          console.log("⚠️ Fallback Sentiment:", sentiment);
         }
+      } catch {
+        sentiment = naiveSentiment(text);
+        console.log("⚠️ Fallback Sentiment (parse error):", sentiment);
       }
 
       const fa = await FeedbackAnalysis.create({
         response: resp._id,
         sentiment,
         categories,
-        tenant: req.tenantId,
+        tenant: tenantId,
       });
+      console.log("✅ FeedbackAnalysis Created ID:", fa._id);
 
       analyses.push({ responseId: resp._id, status: "analyzed", analysis: fa });
+
+      if (fa.sentiment === "negative") {
+        console.log("🚨 Negative Sentiment → Routing to actions...");
+        await generateActionsFromFeedback({
+          body: { feedbackIds: [fa._id] },
+          user: { tenant: tenantId }
+        });
+        await sendNotification({ type: "negative_feedback", feedbackId: fa._id });
+        console.log("✅ Routed negative feedback!");
+      } else if (fa.sentiment === "positive") {
+        console.log("🎉 Positive Sentiment → Sending thank-you...");
+        await sendSurveyWhatsApp({ feedbackId: fa._id, messageType: "thank_you" });
+        console.log("✅ Thank-you sent!");
+      }
     }
 
+    console.log("✅ Exiting analyzeFeedbackLogic with analyses count:", analyses.length);
+    return analyses;
+  } catch (err) {
+    console.error("💥 Error in analyzeFeedbackLogic:", err.message);
+    return { success: false, error: err.message };
+  }
+};
+
+function naiveSentiment(text) {
+  const lower = (text || "").toLowerCase();
+  if (/(bad|poor|terrible|awful|disappoint|angry|hate)/.test(lower)) return "negative";
+  if (/(good|great|excellent|love|awesome|satisfied|happy)/.test(lower)) return "positive";
+  return "neutral";
+}
+
+exports.analyzeFeedback = async (req, res, next) => {
+  try {
+    const { error, value } = analyzeSchema.validate(req.body);
+    if (error) return res.status(400).json({ message: error.details[0].message });
+    const analyses = await exports.analyzeFeedbackLogic(value, req.tenantId);
     res.status(200).json({ message: "Analysis complete", analyses });
   } catch (err) {
     next(err);
   }
 };
 
-// generateActions: produce actionable tasks from FeedbackAnalysis
 const generateSchema = Joi.object({
   feedbackIds: Joi.array().items(Joi.string().hex().length(24)).optional(),
   autoAssignTo: Joi.string().optional(), // userId to assign or team string
@@ -130,20 +255,80 @@ const followUpSchema = Joi.object({
   method: Joi.string().valid("email", "sms", "both").default("email"),
 });
 
-exports.followUp = async (req, res, next) => {
-  try {
-    const { error, value } = followUpSchema.validate(req.body);
-    if (error) return res.status(400).json({ message: error.details[0].message });
+// exports.followUp = async (req, res, next) => {
+//   try {
+//     const { error, value } = followUpSchema.validate(req.body);
+//     if (error) return res.status(400).json({ message: error.details[0].message });
 
-    const { actionIds, messageTemplate, method } = value;
-    const actions = await Action.find({ _id: { $in: actionIds }, tenant: req.tenantId }).populate({
+//     const { actionIds, messageTemplate, method } = value;
+//     const actions = await Action.find({ _id: { $in: actionIds }, tenant: req.tenantId }).populate({
+//       path: "feedback",
+//       populate: { path: "response", model: "SurveyResponse" },
+//     });
+
+//     const results = [];
+//     for (const action of actions) {
+//       // Determine contact: prefer response.user -> fetch user; else skip (or send to team)
+//       const resp = action.feedback?.response;
+//       let toEmail = null;
+//       let toPhone = null;
+//       if (resp?.user) {
+//         const user = await User.findById(resp.user).select("email phone");
+//         if (user) {
+//           toEmail = user.email;
+//           toPhone = user.phone;
+//         }
+//       }
+
+//       // Simple templating: replace {{action}} and {{feedback}}
+//       const message = messageTemplate
+//         .replace(/\{\{action\}\}/g, action.description)
+//         .replace(/\{\{feedback\}\}/g, resp?.review || "");
+
+//       const sent = { actionId: action._id, email: null, sms: null };
+
+//       if ((method === "email" || method === "both") && toEmail) {
+//         await sendEmail({ to: toEmail, subject: "Follow-up regarding your feedback", html: `<p>${message}</p>` });
+//         sent.email = true;
+//       }
+//       if ((method === "sms" || method === "both") && toPhone) {
+//         if (!sendSMS) {
+//           // sendSMS util not implemented
+//           sent.sms = "sms util not configured";
+//         } else {
+//           await sendSMS({ to: toPhone, body: message });
+//           sent.sms = true;
+//         }
+//       }
+
+//       // Optionally mark action as "in-progress" or add note
+//       action.status = action.status === "open" ? "in-progress" : action.status;
+//       await action.save();
+
+//       results.push(sent);
+//     }
+
+//     res.status(200).json({ message: "Follow-ups attempted", results });
+//   } catch (err) {
+//     next(err);
+//   }
+// };
+
+exports.followUp = async ({ actionIds, messageTemplate, method = "email" }) => {
+  console.log("📤 Entering followUp...");
+  console.log("📤 Action IDs:", actionIds);
+  console.log("📝 Message Template:", messageTemplate);
+
+  try {
+    const actions = await Action.find({ _id: { $in: actionIds } }).populate({
       path: "feedback",
-      populate: { path: "response", model: "SurveyResponse" },
+      populate: { path: "response", model: "SurveyResponse" }
     });
+    console.log("📊 Found actions:", actions.length);
 
     const results = [];
     for (const action of actions) {
-      // Determine contact: prefer response.user -> fetch user; else skip (or send to team)
+      console.log("🔍 Processing action ID:", action._id);
       const resp = action.feedback?.response;
       let toEmail = null;
       let toPhone = null;
@@ -152,39 +337,39 @@ exports.followUp = async (req, res, next) => {
         if (user) {
           toEmail = user.email;
           toPhone = user.phone;
+          console.log("👤 User Contact:", { email: toEmail, phone: toPhone });
         }
       }
 
-      // Simple templating: replace {{action}} and {{feedback}}
       const message = messageTemplate
         .replace(/\{\{action\}\}/g, action.description)
         .replace(/\{\{feedback\}\}/g, resp?.review || "");
+      console.log("📝 Generated Message:", message);
 
       const sent = { actionId: action._id, email: null, sms: null };
 
       if ((method === "email" || method === "both") && toEmail) {
-        await sendEmail({ to: toEmail, subject: "Follow-up regarding your feedback", html: `<p>${message}</p>` });
+        await sendEmail({ to: toEmail, subject: "Follow-up on Feedback", html: `<p>${message}</p>` });
         sent.email = true;
+        console.log("✅ Email Sent to:", toEmail);
       }
       if ((method === "sms" || method === "both") && toPhone) {
-        if (!sendSMS) {
-          // sendSMS util not implemented
-          sent.sms = "sms util not configured";
-        } else {
-          await sendSMS({ to: toPhone, body: message });
-          sent.sms = true;
-        }
+        await sendSMS({ to: toPhone, body: message });
+        sent.sms = true;
+        console.log("✅ SMS Sent to:", toPhone);
       }
 
-      // Optionally mark action as "in-progress" or add note
       action.status = action.status === "open" ? "in-progress" : action.status;
       await action.save();
+      console.log("✅ Action Status Updated:", action.status);
 
       results.push(sent);
     }
 
-    res.status(200).json({ message: "Follow-ups attempted", results });
+    console.log("✅ Exiting followUp with results count:", results.length);
+    return results;
   } catch (err) {
-    next(err);
+    console.error("💥 Error in followUp:", err.message);
+    throw err;
   }
 };

@@ -12,7 +12,7 @@ const {
   getSurveyById,
   getPublicSurveys,
   getPublicSurveyById,
-  submitSurvey,
+  submitSurveyResponse,
   updateSurvey,
   deleteSurvey,
   toggleSurveyStatus,
@@ -34,7 +34,7 @@ const {
 // 🟢 Public routes
 router.get("/public/all", getPublicSurveys);
 router.get("/public/:id", getPublicSurveyById);
-router.post("/public/submit", submitSurvey);
+router.post("/public/submit", submitSurveyResponse);
 
 // 🟡 Protected routes
 router.use(protect);

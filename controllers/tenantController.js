@@ -1,3 +1,4 @@
+// controllers/tenantController.js
 const mongoose = require("mongoose");
 const Tenant = require('../models/Tenant');
 const User = require('../models/User');

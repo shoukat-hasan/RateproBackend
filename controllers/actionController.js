@@ -6,6 +6,7 @@ const Survey = require("../models/Survey");
 const aiClient = require("../utils/aiClient");
 const { sendNotification } = require("../utils/sendNotification");
 const Joi = require("joi");
+const followUp = require("./feedbackController")
 
 // Validation schemas
 const createActionSchema = Joi.object({
@@ -49,9 +50,9 @@ exports.createAction = async (req, res, next) => {
   try {
     const { error, value } = createActionSchema.validate(req.body);
     if (error) {
-      return res.status(400).json({ 
-        success: false, 
-        message: error.details[0].message 
+      return res.status(400).json({
+        success: false,
+        message: error.details[0].message
       });
     }
 
@@ -61,9 +62,9 @@ exports.createAction = async (req, res, next) => {
     if (feedbackId) {
       const feedback = await FeedbackAnalysis.findById(feedbackId);
       if (!feedback || feedback.tenant.toString() !== req.user.tenant.toString()) {
-        return res.status(404).json({ 
-          success: false, 
-          message: "Feedback not found" 
+        return res.status(404).json({
+          success: false,
+          message: "Feedback not found"
         });
       }
     }
@@ -72,9 +73,9 @@ exports.createAction = async (req, res, next) => {
     if (assignedTo) {
       const assignee = await User.findById(assignedTo);
       if (!assignee || assignee.tenant.toString() !== req.user.tenant.toString()) {
-        return res.status(404).json({ 
-          success: false, 
-          message: "Assignee not found" 
+        return res.status(404).json({
+          success: false,
+          message: "Assignee not found"
         });
       }
     }
@@ -124,6 +125,8 @@ exports.createAction = async (req, res, next) => {
         data: { actionId: action._id, priority, dueDate: autoDueDate }
       });
     }
+
+    await updateDashboardMetrics(tenantId);
 
     res.status(201).json({
       success: true,
@@ -259,8 +262,8 @@ exports.getActionById = async (req, res, next) => {
       _id: req.params.id,
       tenant: req.user.tenant
     }).populate([
-      { 
-        path: "feedback", 
+      {
+        path: "feedback",
         populate: {
           path: "survey",
           select: "title"
@@ -271,9 +274,9 @@ exports.getActionById = async (req, res, next) => {
     ]);
 
     if (!action) {
-      return res.status(404).json({ 
-        success: false, 
-        message: "Action not found" 
+      return res.status(404).json({
+        success: false,
+        message: "Action not found"
       });
     }
 
@@ -294,9 +297,9 @@ exports.updateAction = async (req, res, next) => {
   try {
     const { error, value } = updateActionSchema.validate(req.body);
     if (error) {
-      return res.status(400).json({ 
-        success: false, 
-        message: error.details[0].message 
+      return res.status(400).json({
+        success: false,
+        message: error.details[0].message
       });
     }
 
@@ -306,21 +309,21 @@ exports.updateAction = async (req, res, next) => {
     });
 
     if (!action) {
-      return res.status(404).json({ 
-        success: false, 
-        message: "Action not found" 
+      return res.status(404).json({
+        success: false,
+        message: "Action not found"
       });
     }
 
     // Check if user can update (admin, companyAdmin, or assigned member)
-    const canUpdate = req.user.role === "admin" || 
-                     req.user.role === "companyAdmin" || 
-                     (action.assignedTo && action.assignedTo.toString() === req.user._id.toString());
+    const canUpdate = req.user.role === "admin" ||
+      req.user.role === "companyAdmin" ||
+      (action.assignedTo && action.assignedTo.toString() === req.user._id.toString());
 
     if (!canUpdate) {
-      return res.status(403).json({ 
-        success: false, 
-        message: "Not authorized to update this action" 
+      return res.status(403).json({
+        success: false,
+        message: "Not authorized to update this action"
       });
     }
 
@@ -390,9 +393,9 @@ exports.deleteAction = async (req, res, next) => {
     });
 
     if (!action) {
-      return res.status(404).json({ 
-        success: false, 
-        message: "Action not found" 
+      return res.status(404).json({
+        success: false,
+        message: "Action not found"
       });
     }
 
@@ -419,9 +422,9 @@ exports.assignAction = async (req, res, next) => {
     });
 
     if (!action) {
-      return res.status(404).json({ 
-        success: false, 
-        message: "Action not found" 
+      return res.status(404).json({
+        success: false,
+        message: "Action not found"
       });
     }
 
@@ -429,9 +432,9 @@ exports.assignAction = async (req, res, next) => {
     if (assignedTo) {
       const assignee = await User.findById(assignedTo);
       if (!assignee || assignee.tenant.toString() !== req.user.tenant.toString()) {
-        return res.status(404).json({ 
-          success: false, 
-          message: "Assignee not found" 
+        return res.status(404).json({
+          success: false,
+          message: "Assignee not found"
         });
       }
     }
@@ -439,7 +442,7 @@ exports.assignAction = async (req, res, next) => {
     const oldAssignee = action.assignedTo;
     action.assignedTo = assignedTo || null;
     action.team = team || action.team;
-    
+
     await action.save();
     await action.populate({ path: "assignedTo", select: "name email avatar" });
 
@@ -470,11 +473,11 @@ exports.assignAction = async (req, res, next) => {
 exports.getActionsByPriority = async (req, res, next) => {
   try {
     const { priority } = req.params;
-    
+
     if (!["high", "medium", "long-term"].includes(priority)) {
-      return res.status(400).json({ 
-        success: false, 
-        message: "Invalid priority level" 
+      return res.status(400).json({
+        success: false,
+        message: "Invalid priority level"
       });
     }
 
@@ -482,11 +485,11 @@ exports.getActionsByPriority = async (req, res, next) => {
       tenant: req.user.tenant,
       priority
     })
-    .populate([
-      { path: "assignedTo", select: "name email avatar" },
-      { path: "feedback", select: "sentiment category" }
-    ])
-    .sort({ createdAt: -1 });
+      .populate([
+        { path: "assignedTo", select: "name email avatar" },
+        { path: "feedback", select: "sentiment category" }
+      ])
+      .sort({ createdAt: -1 });
 
     res.json({
       success: true,
@@ -504,11 +507,11 @@ exports.getActionsByPriority = async (req, res, next) => {
 exports.getActionsByStatus = async (req, res, next) => {
   try {
     const { status } = req.params;
-    
+
     if (!["open", "in-progress", "resolved"].includes(status)) {
-      return res.status(400).json({ 
-        success: false, 
-        message: "Invalid status" 
+      return res.status(400).json({
+        success: false,
+        message: "Invalid status"
       });
     }
 
@@ -516,11 +519,11 @@ exports.getActionsByStatus = async (req, res, next) => {
       tenant: req.user.tenant,
       status
     })
-    .populate([
-      { path: "assignedTo", select: "name email avatar" },
-      { path: "feedback", select: "sentiment category" }
-    ])
-    .sort({ createdAt: -1 });
+      .populate([
+        { path: "assignedTo", select: "name email avatar" },
+        { path: "feedback", select: "sentiment category" }
+      ])
+      .sort({ createdAt: -1 });
 
     res.json({
       success: true,
@@ -542,11 +545,11 @@ exports.getActionsAnalytics = async (req, res, next) => {
     daysAgo.setDate(daysAgo.getDate() - parseInt(period));
 
     const analytics = await Action.aggregate([
-      { 
-        $match: { 
+      {
+        $match: {
           tenant: req.user.tenant,
           createdAt: { $gte: daysAgo }
-        } 
+        }
       },
       {
         $facet: {
@@ -582,9 +585,9 @@ exports.getActionsAnalytics = async (req, res, next) => {
             {
               $group: {
                 _id: {
-                  $dateToString: { 
-                    format: "%Y-%m-%d", 
-                    date: "$createdAt" 
+                  $dateToString: {
+                    format: "%Y-%m-%d",
+                    date: "$createdAt"
                   }
                 },
                 created: { $sum: 1 },
@@ -654,9 +657,9 @@ exports.bulkUpdateActions = async (req, res, next) => {
   try {
     const { error, value } = bulkUpdateSchema.validate(req.body);
     if (error) {
-      return res.status(400).json({ 
-        success: false, 
-        message: error.details[0].message 
+      return res.status(400).json({
+        success: false,
+        message: error.details[0].message
       });
     }
 
@@ -669,9 +672,9 @@ exports.bulkUpdateActions = async (req, res, next) => {
     });
 
     if (actions.length !== actionIds.length) {
-      return res.status(404).json({ 
-        success: false, 
-        message: "Some actions not found" 
+      return res.status(404).json({
+        success: false,
+        message: "Some actions not found"
       });
     }
 
@@ -698,31 +701,176 @@ exports.bulkUpdateActions = async (req, res, next) => {
 // @desc    Generate actions from feedback using AI
 // @route   POST /api/actions/generate/feedback
 // @access  Private (companyAdmin, admin)
+// exports.generateActionsFromFeedback = async (req, res, next) => {
+//   try {
+//     const { feedbackIds, options = {} } = req.body;
+
+//     if (!feedbackIds || !Array.isArray(feedbackIds) || feedbackIds.length === 0) {
+//       return res.status(400).json({
+//         success: false,
+//         message: "Feedback IDs array required"
+//       });
+//     }
+
+//     // Get feedback data
+//     const feedbacks = await FeedbackAnalysis.find({
+//       _id: { $in: feedbackIds },
+//       tenant: req.user.tenant
+//     }).populate("survey", "title");
+
+//     if (feedbacks.length === 0) {
+//       return res.status(404).json({
+//         success: false,
+//         message: "No feedback found"
+//       });
+//     }
+
+//     // Prepare AI prompt
+//     const feedbackSummary = feedbacks.map(f => ({
+//       id: f._id,
+//       sentiment: f.sentiment,
+//       category: f.category,
+//       summary: f.summary,
+//       survey: f.survey?.title
+//     }));
+
+//     const prompt = `
+// Based on the following feedback analysis, generate actionable items to address the issues and improve customer satisfaction:
+
+// ${JSON.stringify(feedbackSummary, null, 2)}
+
+// For each action item, provide:
+// 1. A clear, concise description (max 100 words)
+// 2. Priority level (high/medium/long-term)
+// 3. Suggested team or department
+// 4. Category for the action
+
+// Focus on:
+// - Immediate fixes for high-impact negative feedback
+// - Process improvements for recurring issues
+// - Long-term strategic improvements
+
+// Return a JSON array of action objects with fields: description, priority, team, category
+// `;
+
+//     try {
+//       const aiResponse = await aiClient.complete({
+//         prompt,
+//         maxTokens: 1000
+//       });
+
+//       let suggestedActions;
+//       try {
+//         suggestedActions = JSON.parse(aiResponse.text);
+//       } catch {
+//         // Fallback parsing if AI returns non-JSON
+//         suggestedActions = [
+//           {
+//             description: "Review and improve customer service processes based on feedback",
+//             priority: "medium",
+//             team: "Customer Service",
+//             category: "Process Improvement"
+//           }
+//         ];
+//       }
+
+//       // Create actions in database
+//       const createdActions = [];
+//       for (const actionData of suggestedActions) {
+//         try {
+//           const action = await Action.create({
+//             feedback: feedbacks[0]._id, // Link to first feedback for reference
+//             description: actionData.description,
+//             priority: actionData.priority || "medium",
+//             team: actionData.team || "General",
+//             category: actionData.category || "AI Generated",
+//             tenant: req.user.tenant,
+//             createdBy: req.user._id,
+//             tags: ["ai-generated", "feedback-analysis"]
+//           });
+
+//           createdActions.push(action);
+//         } catch (err) {
+//           console.error("Error creating action:", err);
+//         }
+//       }
+
+//       if (createdActions.length > 0) {
+//         const actionIds = createdActions.map(a => a._id);
+//         await followUp({ actionIds, messageTemplate: 'Your feedback received, we are on it!' });
+//       }
+
+//       res.json({
+//         success: true,
+//         message: `${createdActions.length} actions generated successfully`,
+//         data: {
+//           actions: createdActions,
+//           feedbackProcessed: feedbacks.length
+//         }
+//       });
+
+//     } catch (aiError) {
+//       console.error("AI generation error:", aiError);
+
+//       // Fallback: create basic actions
+//       const fallbackActions = await Promise.all(
+//         feedbacks.filter(f => f.sentiment === "negative").map(f =>
+//           Action.create({
+//             feedback: f._id,
+//             description: `Address feedback concerns: ${f.summary?.substring(0, 100) || 'Review customer feedback'}`,
+//             priority: "high",
+//             team: "Customer Service",
+//             category: "Customer Issue",
+//             tenant: req.user.tenant,
+//             createdBy: req.user._id,
+//             tags: ["auto-generated", "negative-feedback"]
+//           })
+//         )
+//       );
+//       if (fallbackActions.length > 0) {
+//         const actionIds = fallbackActions.map(a => a._id);
+//         await followUp({ actionIds, messageTemplate: 'Your feedback received, we are on it!' });
+//       }
+
+//       res.json({
+//         success: true,
+//         message: `${fallbackActions.length} basic actions generated (AI unavailable)`,
+//         data: {
+//           actions: fallbackActions,
+//           feedbackProcessed: feedbacks.length,
+//           fallback: true
+//         }
+//       });
+//     }
+
+//   } catch (error) {
+//     next(error);
+//   }
+// };
 exports.generateActionsFromFeedback = async (req, res, next) => {
+  console.log("🤖 Entering generateActionsFromFeedback...");
+  console.log("🤖 Request Body:", req.body);
+
   try {
     const { feedbackIds, options = {} } = req.body;
+    console.log("🔍 Feedback IDs:", feedbackIds);
 
     if (!feedbackIds || !Array.isArray(feedbackIds) || feedbackIds.length === 0) {
-      return res.status(400).json({ 
-        success: false, 
-        message: "Feedback IDs array required" 
-      });
+      console.error("❌ Invalid feedbackIds");
+      return res.status(400).json({ success: false, message: "Feedback IDs array required" });
     }
 
-    // Get feedback data
     const feedbacks = await FeedbackAnalysis.find({
       _id: { $in: feedbackIds },
       tenant: req.user.tenant
     }).populate("survey", "title");
+    console.log("📊 Found feedbacks:", feedbacks.length);
 
     if (feedbacks.length === 0) {
-      return res.status(404).json({ 
-        success: false, 
-        message: "No feedback found" 
-      });
+      console.log("❌ No feedback found");
+      return res.status(404).json({ success: false, message: "No feedback found" });
     }
 
-    // Prepare AI prompt
     const feedbackSummary = feedbacks.map(f => ({
       id: f._id,
       sentiment: f.sentiment,
@@ -730,108 +878,82 @@ exports.generateActionsFromFeedback = async (req, res, next) => {
       summary: f.summary,
       survey: f.survey?.title
     }));
+    console.log("📝 Feedback Summary:", feedbackSummary);
 
-    const prompt = `
-Based on the following feedback analysis, generate actionable items to address the issues and improve customer satisfaction:
-
-${JSON.stringify(feedbackSummary, null, 2)}
-
-For each action item, provide:
-1. A clear, concise description (max 100 words)
-2. Priority level (high/medium/long-term)
-3. Suggested team or department
-4. Category for the action
-
-Focus on:
-- Immediate fixes for high-impact negative feedback
-- Process improvements for recurring issues
-- Long-term strategic improvements
-
-Return a JSON array of action objects with fields: description, priority, team, category
-`;
+    const prompt = `Based on the following... Return JSON array...`;
+    console.log("🤖 Sending AI prompt...");
 
     try {
-      const aiResponse = await aiClient.complete({
-        prompt,
-        maxTokens: 1000
-      });
+      const aiResponse = await aiClient.complete({ prompt, maxTokens: 1000 });
+      console.log("✅ AI Response:", aiResponse.text?.substring(0, 100) + "...");
 
       let suggestedActions;
       try {
         suggestedActions = JSON.parse(aiResponse.text);
+        console.log("✅ Parsed Actions:", suggestedActions.length);
       } catch {
-        // Fallback parsing if AI returns non-JSON
-        suggestedActions = [
-          {
-            description: "Review and improve customer service processes based on feedback",
-            priority: "medium",
-            team: "Customer Service",
-            category: "Process Improvement"
-          }
-        ];
+        suggestedActions = [{ description: "Review customer service...", priority: "medium", team: "Customer Service", category: "Process Improvement" }];
+        console.log("⚠️ Fallback parsing used");
       }
 
-      // Create actions in database
       const createdActions = [];
       for (const actionData of suggestedActions) {
-        try {
-          const action = await Action.create({
-            feedback: feedbacks[0]._id, // Link to first feedback for reference
-            description: actionData.description,
-            priority: actionData.priority || "medium",
-            team: actionData.team || "General",
-            category: actionData.category || "AI Generated",
-            tenant: req.user.tenant,
-            createdBy: req.user._id,
-            tags: ["ai-generated", "feedback-analysis"]
-          });
-
-          createdActions.push(action);
-        } catch (err) {
-          console.error("Error creating action:", err);
-        }
+        console.log("📝 Creating action for:", actionData.description);
+        const action = await Action.create({
+          feedback: feedbacks[0]._id,
+          description: actionData.description,
+          priority: actionData.priority || "medium",
+          team: actionData.team || "General",
+          category: actionData.category || "AI Generated",
+          tenant: req.user.tenant,
+          createdBy: req.user._id,
+          tags: ["ai-generated", "feedback-analysis"]
+        });
+        createdActions.push(action);
+        console.log("✅ Action Created ID:", action._id);
       }
 
-      res.json({
-        success: true,
-        message: `${createdActions.length} actions generated successfully`,
-        data: {
-          actions: createdActions,
-          feedbackProcessed: feedbacks.length
-        }
-      });
+      if (createdActions.length > 0) {
+        const actionIds = createdActions.map(a => a._id);
+        console.log("📤 Calling followUp with IDs:", actionIds);
+        await followUp({ actionIds, messageTemplate: 'Your feedback received, we are on it!' });
+        console.log("✅ Follow-up complete!");
+      }
 
+      res.json({ success: true, message: `${createdActions.length} actions generated`, data: { actions: createdActions, feedbackProcessed: feedbacks.length } });
+      console.log("✅ Exiting with success!");
     } catch (aiError) {
-      console.error("AI generation error:", aiError);
-      
-      // Fallback: create basic actions
+      console.error("💥 AI Error:", aiError.message);
+
       const fallbackActions = await Promise.all(
-        feedbacks.filter(f => f.sentiment === "negative").map(f =>
-          Action.create({
+        feedbacks.filter(f => f.sentiment === "negative").map(f => {
+          console.log("⚠️ Fallback action for feedback:", f._id);
+          return Action.create({
             feedback: f._id,
-            description: `Address feedback concerns: ${f.summary?.substring(0, 100) || 'Review customer feedback'}`,
+            description: `Address concerns: ${f.summary?.substring(0, 100) || 'Review feedback'}`,
             priority: "high",
             team: "Customer Service",
             category: "Customer Issue",
             tenant: req.user.tenant,
             createdBy: req.user._id,
             tags: ["auto-generated", "negative-feedback"]
-          })
-        )
+          });
+        })
       );
+      console.log("⚠️ Fallback Actions Created:", fallbackActions.length);
 
-      res.json({
-        success: true,
-        message: `${fallbackActions.length} basic actions generated (AI unavailable)`,
-        data: {
-          actions: fallbackActions,
-          feedbackProcessed: feedbacks.length,
-          fallback: true
-        }
-      });
+      if (fallbackActions.length > 0) {
+        const actionIds = fallbackActions.map(a => a._id);
+        console.log("📤 Calling followUp (fallback):", actionIds);
+        await followUp({ actionIds, messageTemplate: 'Your feedback received, we are on it!' });
+        console.log("✅ Fallback follow-up complete!");
+      }
+
+      res.json({ success: true, message: `${fallbackActions.length} basic actions generated (AI unavailable)`, data: { actions: fallbackActions, feedbackProcessed: feedbacks.length, fallback: true } });
+      console.log("✅ Exiting with fallback success!");
     }
-
   } catch (error) {
+    console.error("💥 Error in generateActionsFromFeedback:", error.message);
     next(error);
   }
 };

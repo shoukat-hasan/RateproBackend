@@ -1,5 +1,4 @@
 // controllers\surveyController.js
-
 const mongoose = require("mongoose");
 const Survey = require("../models/Survey");
 const SurveyResponse = require("../models/SurveyResponse");
@@ -13,6 +12,7 @@ const path = require("path");
 const { Parser } = require("json2csv");
 const { getNextQuestion } = require("../utils/logicEngine");
 const aiClient = require("../utils/aiClient");
+const { analyzeFeedbackLogic } = require("./feedbackController")
 
 // ===== CREATE SURVEY =====
 exports.createSurvey = async (req, res, next) => {
@@ -408,128 +408,140 @@ exports.getSurveyById = async (req, res, next) => {
 };
 
 // ===== TAKE SURVEY / SUBMIT RESPONSE =====
-// exports.submitSurvey = async (req, res, next) => {
-//   try {
-//     console.log('📥 Incoming survey submission body:', req.body);
-//     console.log('📡 IP Address:', req.ip);
-//     console.log('👤 Auth User:', req.user?._id || 'Anonymous');
+// exports.submitSurveyResponse = async (req, res, next) => {
+//     console.log("📥 Entering submitSurveyResponse...");
+//     console.log("📥 Request Body:", req.body);
+//     console.log("📡 IP Address:", req.ip);
+//     console.log("👤 Auth User:", req.user?._id || "Anonymous");
+//     try {
+//         const { surveyId, answers, responses, review, score, rating, deviceId } =
+//             req.body;
+//         const finalAnswers = answers || responses;
 
-//     const { surveyId, answers, review, score, rating, deviceId } = req.body;
+//         console.log("🔍 Survey ID:", surveyId);
+//         console.log("📝 Final Answers:", finalAnswers);
 
-//     // 🧠 STEP 1: Survey check
-//     console.log('🔍 Looking for survey with ID:', surveyId);
-//     const survey = await Survey.findById(surveyId);
-//     if (!survey) {
-//       console.log('❌ Survey not found in DB for ID:', surveyId);
-//       return res.status(404).json({ message: 'Survey not found' });
+//         // 🧠 STEP 1: Survey check
+//         const survey = await Survey.findById(surveyId);
+//         if (!survey) {
+//             console.log("❌ Survey not found in DB for ID:", surveyId);
+//             return res.status(404).json({ message: "Survey not found" });
+//         }
+//         if (survey.deleted) {
+//             console.log("🚫 Survey is marked as deleted:", surveyId);
+//             return res.status(404).json({ message: "Survey not found (deleted)" });
+//         }
+//         console.log("✅ Survey found:", survey.title);
+
+//         // 🧠 STEP 2: Duplicate submission check
+//         const exists = await SurveyResponse.findOne({
+//             survey: surveyId,
+//             $or: [{ user: req.user?._id }, { ip: req.ip }],
+//         });
+//         if (exists) {
+//             console.log("⚠️ Duplicate submission detected for survey:", surveyId);
+//             return res
+//                 .status(400)
+//                 .json({ message: "You already submitted this survey" });
+//         }
+
+//         // 🧠 STEP 3: Create new response
+//         console.log("📝 Creating survey response...");
+//         const response = new SurveyResponse({
+//             survey: surveyId,
+//             user: survey.settings?.isAnonymous ? null : req.user?._id,
+//             answers: finalAnswers,
+//             review,
+//             score,
+//             rating,
+//             isAnonymous: survey.settings?.isAnonymous || false,
+//             ip: req.ip,
+//             deviceId,
+//             tenant: survey.tenant,
+//         });
+
+//         await response.save();
+//         console.log("✅ Survey response saved with ID:", response._id);
+
+//         // 🧠 STEP 4: Update stats
+//         const allResponses = await SurveyResponse.find({ survey: surveyId });
+//         const total = allResponses.length;
+//         const avgScore =
+//             allResponses.reduce((sum, r) => sum + (r.score || 0), 0) / total;
+//         const avgRating =
+//             allResponses.reduce((sum, r) => sum + (r.rating || 0), 0) / total;
+
+//         survey.totalResponses = total;
+//         survey.averageScore = Math.round(avgScore || 0);
+//         survey.averageRating = Math.round(avgRating || 0);
+//         await survey.save();
+//         console.log("📊 Updated survey stats:", { total, avgScore, avgRating });
+//         await analyzeFeedbackLogic({ responseIds: [response._id] }, req.tenantId);
+
+//         // 🧠 STEP 5: Next Question Logic
+//         let nextQuestionId = null;
+//         if (answers && answers.length > 0) {
+//             const lastAnswer = answers[answers.length - 1];
+//             const currentQ = survey.questions.find(
+//                 (q) => q._id.toString() === lastAnswer.questionId
+//             );
+//             console.log("🧭 Last Answer:", lastAnswer);
+//             console.log(
+//                 "🔎 Current Question Found:",
+//                 currentQ ? currentQ._id : "Not Found"
+//             );
+
+//             if (currentQ) {
+//                 nextQuestionId = getNextQuestion(lastAnswer.answer, currentQ);
+//                 console.log("➡️ Next Question ID:", nextQuestionId);
+//             }
+//         }
+
+//         // 🧠 STEP 6: Trigger Actions
+//         await generateActionsFromResponse(response, survey, req.tenantId);
+//         console.log("🤖 Actions generated successfully");
+
+//         res
+//             .status(201)
+//             .json({ message: "Survey submitted", response, nextQuestionId });
+//     } catch (err) {
+//         console.error("💥 Submission Controller Error:", err);
+//         next(err);
 //     }
-//     if (survey.deleted) {
-//       console.log('🚫 Survey is marked as deleted:', surveyId);
-//       return res.status(404).json({ message: 'Survey not found (deleted)' });
-//     }
-//     console.log('✅ Survey found:', survey.title);
-
-//     // 🧠 STEP 2: Duplicate submission check
-//     const exists = await SurveyResponse.findOne({
-//       survey: surveyId,
-//       $or: [{ user: req.user?._id }, { ip: req.ip }],
-//     });
-//     if (exists) {
-//       console.log('⚠️ Duplicate submission detected for survey:', surveyId);
-//       return res.status(400).json({ message: 'You already submitted this survey' });
-//     }
-
-//     // 🧠 STEP 3: Create new response
-//     console.log('📝 Creating survey response...');
-//     const response = new SurveyResponse({
-//       survey: surveyId,
-//       user: survey.settings?.isAnonymous ? null : req.user?._id,
-//       answers,
-//       review,
-//       score,
-//       rating,
-//       isAnonymous: survey.settings?.isAnonymous || false,
-//       ip: req.ip,
-//       deviceId,
-//       tenant: survey.tenant, 
-//     });
-
-//     await response.save();
-//     console.log('✅ Survey response saved with ID:', response._id);
-
-//     // 🧠 STEP 4: Update stats
-//     const allResponses = await SurveyResponse.find({ survey: surveyId });
-//     const total = allResponses.length;
-//     const avgScore = allResponses.reduce((sum, r) => sum + (r.score || 0), 0) / total;
-//     const avgRating = allResponses.reduce((sum, r) => sum + (r.rating || 0), 0) / total;
-
-//     survey.totalResponses = total;
-//     survey.averageScore = Math.round(avgScore || 0);
-//     survey.averageRating = Math.round(avgRating || 0);
-//     await survey.save();
-//     console.log('📊 Updated survey stats:', { total, avgScore, avgRating });
-
-//     // 🧠 STEP 5: Next Question Logic
-//     let nextQuestionId = null;
-//     if (answers && answers.length > 0) {
-//       const lastAnswer = answers[answers.length - 1];
-//       const currentQ = survey.questions.find(q => q._id.toString() === lastAnswer.questionId);
-//       console.log('🧭 Last Answer:', lastAnswer);
-//       console.log('🔎 Current Question Found:', currentQ ? currentQ._id : 'Not Found');
-
-//       if (currentQ) {
-//         nextQuestionId = getNextQuestion(lastAnswer.answer, currentQ);
-//         console.log('➡️ Next Question ID:', nextQuestionId);
-//       }
-//     }
-
-//     // 🧠 STEP 6: Trigger Actions
-//     await generateActionsFromResponse(response, survey, req.tenantId);
-//     console.log('🤖 Actions generated successfully');
-
-//     res.status(201).json({ message: 'Survey submitted', response, nextQuestionId });
-//   } catch (err) {
-//     console.error('💥 Submission Controller Error:', err);
-//     next(err);
-//   }
 // };
-exports.submitSurvey = async (req, res, next) => {
+exports.submitSurveyResponse = async (req, res, next) => {
+    console.log("📥 Entering submitSurveyResponse...");
+    console.log("📥 Request Body:", req.body);
+    console.log("📡 IP Address:", req.ip);
+    console.log("👤 Auth User:", req.user?._id || "Anonymous");
+
     try {
-        console.log("📥 Incoming survey submission body:", req.body);
-        console.log("📡 IP Address:", req.ip);
-        console.log("👤 Auth User:", req.user?._id || "Anonymous");
-
-        const { surveyId, answers, responses, review, score, rating, deviceId } =
-            req.body;
+        const { surveyId, answers, responses, review, score, rating, deviceId } = req.body;
         const finalAnswers = answers || responses;
+        console.log("🔍 Survey ID:", surveyId);
+        console.log("📝 Final Answers:", finalAnswers);
 
-        // 🧠 STEP 1: Survey check
-        console.log("🔍 Looking for survey with ID:", surveyId);
+        // STEP 1: Survey check
         const survey = await Survey.findById(surveyId);
         if (!survey) {
-            console.log("❌ Survey not found in DB for ID:", surveyId);
+            console.log("❌ Survey not found for ID:", surveyId);
             return res.status(404).json({ message: "Survey not found" });
         }
         if (survey.deleted) {
-            console.log("🚫 Survey is marked as deleted:", surveyId);
+            console.log("🚫 Survey deleted for ID:", surveyId);
             return res.status(404).json({ message: "Survey not found (deleted)" });
         }
-        console.log("✅ Survey found:", survey.title);
+        console.log("✅ Survey Found:", survey.title);
 
-        // 🧠 STEP 2: Duplicate submission check
-        const exists = await SurveyResponse.findOne({
-            survey: surveyId,
-            $or: [{ user: req.user?._id }, { ip: req.ip }],
-        });
+        // STEP 2: Duplicate check
+        const exists = await SurveyResponse.findOne({ survey: surveyId, $or: [{ user: req.user?._id }, { ip: req.ip }] });
         if (exists) {
             console.log("⚠️ Duplicate submission detected for survey:", surveyId);
-            return res
-                .status(400)
-                .json({ message: "You already submitted this survey" });
+            return res.status(400).json({ message: "You already submitted this survey" });
         }
 
-        // 🧠 STEP 3: Create new response
-        console.log("📝 Creating survey response...");
+        // STEP 3: Create response
+        console.log("📝 Creating new SurveyResponse...");
         const response = new SurveyResponse({
             survey: surveyId,
             user: survey.settings?.isAnonymous ? null : req.user?._id,
@@ -542,52 +554,75 @@ exports.submitSurvey = async (req, res, next) => {
             deviceId,
             tenant: survey.tenant,
         });
-
         await response.save();
-        console.log("✅ Survey response saved with ID:", response._id);
+        console.log("✅ Response Saved with ID:", response._id);
 
-        // 🧠 STEP 4: Update stats
+        // STEP 4: Update stats
         const allResponses = await SurveyResponse.find({ survey: surveyId });
         const total = allResponses.length;
-        const avgScore =
-            allResponses.reduce((sum, r) => sum + (r.score || 0), 0) / total;
-        const avgRating =
-            allResponses.reduce((sum, r) => sum + (r.rating || 0), 0) / total;
-
+        const avgScore = allResponses.reduce((sum, r) => sum + (r.score || 0), 0) / total;
+        const avgRating = allResponses.reduce((sum, r) => sum + (r.rating || 0), 0) / total;
         survey.totalResponses = total;
         survey.averageScore = Math.round(avgScore || 0);
         survey.averageRating = Math.round(avgRating || 0);
         await survey.save();
-        console.log("📊 Updated survey stats:", { total, avgScore, avgRating });
+        console.log("📊 Updated Stats:", { total, avgScore, avgRating });
 
-        // 🧠 STEP 5: Next Question Logic
+        const tenantId = req.tenantId || req.user?.tenant || survey.tenant;
+        console.log("🏢 EXTRACTED Tenant ID:", tenantId);
+
+        if (!tenantId) {
+            console.error("💥 CRITICAL: No tenantId found!");
+            return res.status(400).json({ message: "Tenant not configured" });
+        }
+
+        // STEP 5: Analyze call
+        console.log("🧠 Calling analyzeFeedbackLogic...");
+        await analyzeFeedbackLogic({ responseIds: [response._id] }, survey.tenant);
+        console.log("✅ Analyze complete!");
+
+        // STEP 6: Next question logic (if applicable)
         let nextQuestionId = null;
-        if (answers && answers.length > 0) {
-            const lastAnswer = answers[answers.length - 1];
-            const currentQ = survey.questions.find(
-                (q) => q._id.toString() === lastAnswer.questionId
-            );
+        if (finalAnswers?.length > 0) {
+            const lastAnswer = finalAnswers[finalAnswers.length - 1];
+            const currentQ = survey.questions.find(q => q._id.toString() === lastAnswer.questionId);
             console.log("🧭 Last Answer:", lastAnswer);
-            console.log(
-                "🔎 Current Question Found:",
-                currentQ ? currentQ._id : "Not Found"
-            );
-
+            console.log("🔎 Current Question:", currentQ ? currentQ._id : "Not Found");
             if (currentQ) {
                 nextQuestionId = getNextQuestion(lastAnswer.answer, currentQ);
                 console.log("➡️ Next Question ID:", nextQuestionId);
             }
         }
 
-        // 🧠 STEP 6: Trigger Actions
-        await generateActionsFromResponse(response, survey, req.tenantId);
-        console.log("🤖 Actions generated successfully");
+        // STEP 7: Trigger actions
+        console.log("🤖 Calling generateActionsFromResponse...");
+        await generateActionsFromResponse(response, survey, survey.tenant);
+        // Inside function:
+        let cleaned = aiResult.text
+            .replace(/```json/g, '')
+            .replace(/\n?```/g, '')
+            .trim();
 
-        res
-            .status(201)
-            .json({ message: "Survey submitted", response, nextQuestionId });
+        try {
+            const parsed = JSON.parse(cleaned);
+            // use parsed
+        } catch {
+            // fallback action
+            await Action.create({
+                description: `Auto-generated: ${feedbackText.substring(0, 100)}...`,
+                priority: "high",
+                team: "Management",
+                category: "Customer Issue",
+                tenant: tenantId,
+                tags: ["auto-fallback"]
+            });
+        }
+        console.log("✅ Actions generated!");
+
+        res.status(201).json({ message: "Survey submitted", response, nextQuestionId });
+        console.log("✅ Exiting submitSurveyResponse with success!");
     } catch (err) {
-        console.error("💥 Submission Controller Error:", err);
+        console.error("💥 Error in submitSurveyResponse:", err.message);
         next(err);
     }
 };

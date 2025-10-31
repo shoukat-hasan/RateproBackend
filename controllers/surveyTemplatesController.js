@@ -1,4 +1,4 @@
-// surveyTemplatesControllers
+// /controllers/surveyTemplatesControllers
 
 const surveyTemplates = require("../models/surveyTemplates.js");
 
