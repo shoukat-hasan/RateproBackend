@@ -65,50 +65,57 @@ exports.createSurvey = async (req, res, next) => {
 // ===== AUTO ACTION GENERATION FROM SURVEY RESPONSES (Flow.md Section 7) =====
 const generateActionsFromResponse = async (response, survey, tenantId) => {
     try {
-        // Skip action generation for anonymous surveys or if no negative feedback
-        if (survey.settings?.isAnonymous && !hasNegativeFeedback(response)) {
-            return;
+        const feedbackText = response.review || response.answers.map(a => a.answer).join(" ");
+        if (!feedbackText.trim()) return;
+
+        console.log("🤖 Generating action for feedback:", feedbackText.substring(0, 100));
+
+        // AI Call
+        const prompt = `Analyze this feedback and suggest one high-priority action: "${feedbackText}"`;
+        const aiResult = await aiClient.complete({ prompt, maxTokens: 300 });
+
+        let description = "Review customer feedback";
+        let priority = "medium";
+
+        // Clean AI response
+        let cleaned = (aiResult.text || "")
+            .replace(/```json\n?/g, '')
+            .replace(/\n?```/g, '')
+            .trim();
+
+        try {
+            const parsed = JSON.parse(cleaned);
+            description = parsed.description || parsed.summary || description;
+            priority = parsed.priority || priority;
+        } catch {
+            // Fallback
+            description = `Auto: Address "${feedbackText.substring(0, 80)}..."`;
+            priority = "high";
         }
 
-        const feedbackAnalysis = await analyzeFeedbackSentiment(response, survey);
+        // Create Action
+        const action = await Action.create({
+            title: "Customer Feedback Review",
+            description,
+            priority,
+            team: "Customer Service",
+            category: "Customer Issue",
+            tenant: tenantId,
+            tags: ["auto-generated", "survey"],
+            metadata: { responseId: response._id, surveyId: survey._id }
+        });
 
-        // Only generate actions for negative/neutral feedback or low ratings
-        if (feedbackAnalysis.shouldGenerateAction) {
-            const actionData = await generateActionFromFeedback(feedbackAnalysis, survey, tenantId);
+        console.log("✅ Auto-generated action:", action._id);
 
-            if (actionData) {
-                const action = new Action({
-                    title: actionData.title,
-                    description: actionData.description,
-                    priority: actionData.priority,
-                    category: actionData.category,
-                    department: actionData.department,
-                    dueDate: actionData.dueDate,
-                    status: 'pending',
-                    source: 'survey_feedback',
-                    metadata: {
-                        surveyId: survey._id,
-                        responseId: response._id,
-                        sentiment: feedbackAnalysis.sentiment,
-                        confidence: feedbackAnalysis.confidence,
-                        urgency: feedbackAnalysis.urgency
-                    },
-                    tenant: tenantId,
-                    createdBy: null // System generated
-                });
+        // Optional: Follow-up
+        await followUp({ 
+            actionIds: [action._id], 
+            messageTemplate: "Your feedback is being addressed!" 
+        });
 
-                await action.save();
-                console.log(`🤖 Auto-generated action: ${action.title}`);
-
-                // Send notification to managers for high priority issues (Flow.md Section 6)
-                if (action.priority === 'high') {
-                    await notifyManagersOfUrgentAction(action, tenantId);
-                }
-            }
-        }
     } catch (error) {
-        console.error('Error generating actions from feedback:', error);
-        // Don't throw - action generation shouldn't break survey submission
+        console.error("Error in generateActionsFromResponse:", error.message);
+        // Don't break submission
     }
 };
 
@@ -197,45 +204,6 @@ const analyzeFeedbackSentiment = async (response, survey) => {
             department: 'management',
             summary: response.review || 'Customer feedback requires attention'
         };
-    }
-};
-
-// Generate structured action from feedback analysis
-const generateActionFromFeedback = async (analysis, survey, tenantId) => {
-    try {
-        const priorityMap = {
-            'high': 'high',
-            'medium': 'medium',
-            'low': 'low'
-        };
-
-        const dueDateHours = {
-            'high': 24,    // 24 hours for urgent issues
-            'medium': 72,  // 3 days for medium issues
-            'low': 168     // 1 week for low priority
-        };
-
-        const dueDate = new Date();
-        dueDate.setHours(dueDate.getHours() + dueDateHours[analysis.urgency]);
-
-        return {
-            title: `${survey.category || 'Customer'} Feedback: ${analysis.summary.substring(0, 50)}...`,
-            description: `Action required based on ${analysis.sentiment} feedback from survey "${survey.title}".
-            
-Issue Category: ${analysis.categories.join(', ')}
-Confidence: ${Math.round(analysis.confidence * 100)}%
-Original Feedback: "${analysis.summary}"
-
-Recommended Action: Address the ${analysis.categories[0]} issue mentioned in the feedback.`,
-            priority: priorityMap[analysis.urgency],
-            category: analysis.categories[0] || 'general',
-            department: analysis.department,
-            dueDate: dueDate
-        };
-
-    } catch (error) {
-        console.error('Error generating action data:', error);
-        return null;
     }
 };
 
@@ -408,107 +376,6 @@ exports.getSurveyById = async (req, res, next) => {
 };
 
 // ===== TAKE SURVEY / SUBMIT RESPONSE =====
-// exports.submitSurveyResponse = async (req, res, next) => {
-//     console.log("📥 Entering submitSurveyResponse...");
-//     console.log("📥 Request Body:", req.body);
-//     console.log("📡 IP Address:", req.ip);
-//     console.log("👤 Auth User:", req.user?._id || "Anonymous");
-//     try {
-//         const { surveyId, answers, responses, review, score, rating, deviceId } =
-//             req.body;
-//         const finalAnswers = answers || responses;
-
-//         console.log("🔍 Survey ID:", surveyId);
-//         console.log("📝 Final Answers:", finalAnswers);
-
-//         // 🧠 STEP 1: Survey check
-//         const survey = await Survey.findById(surveyId);
-//         if (!survey) {
-//             console.log("❌ Survey not found in DB for ID:", surveyId);
-//             return res.status(404).json({ message: "Survey not found" });
-//         }
-//         if (survey.deleted) {
-//             console.log("🚫 Survey is marked as deleted:", surveyId);
-//             return res.status(404).json({ message: "Survey not found (deleted)" });
-//         }
-//         console.log("✅ Survey found:", survey.title);
-
-//         // 🧠 STEP 2: Duplicate submission check
-//         const exists = await SurveyResponse.findOne({
-//             survey: surveyId,
-//             $or: [{ user: req.user?._id }, { ip: req.ip }],
-//         });
-//         if (exists) {
-//             console.log("⚠️ Duplicate submission detected for survey:", surveyId);
-//             return res
-//                 .status(400)
-//                 .json({ message: "You already submitted this survey" });
-//         }
-
-//         // 🧠 STEP 3: Create new response
-//         console.log("📝 Creating survey response...");
-//         const response = new SurveyResponse({
-//             survey: surveyId,
-//             user: survey.settings?.isAnonymous ? null : req.user?._id,
-//             answers: finalAnswers,
-//             review,
-//             score,
-//             rating,
-//             isAnonymous: survey.settings?.isAnonymous || false,
-//             ip: req.ip,
-//             deviceId,
-//             tenant: survey.tenant,
-//         });
-
-//         await response.save();
-//         console.log("✅ Survey response saved with ID:", response._id);
-
-//         // 🧠 STEP 4: Update stats
-//         const allResponses = await SurveyResponse.find({ survey: surveyId });
-//         const total = allResponses.length;
-//         const avgScore =
-//             allResponses.reduce((sum, r) => sum + (r.score || 0), 0) / total;
-//         const avgRating =
-//             allResponses.reduce((sum, r) => sum + (r.rating || 0), 0) / total;
-
-//         survey.totalResponses = total;
-//         survey.averageScore = Math.round(avgScore || 0);
-//         survey.averageRating = Math.round(avgRating || 0);
-//         await survey.save();
-//         console.log("📊 Updated survey stats:", { total, avgScore, avgRating });
-//         await analyzeFeedbackLogic({ responseIds: [response._id] }, req.tenantId);
-
-//         // 🧠 STEP 5: Next Question Logic
-//         let nextQuestionId = null;
-//         if (answers && answers.length > 0) {
-//             const lastAnswer = answers[answers.length - 1];
-//             const currentQ = survey.questions.find(
-//                 (q) => q._id.toString() === lastAnswer.questionId
-//             );
-//             console.log("🧭 Last Answer:", lastAnswer);
-//             console.log(
-//                 "🔎 Current Question Found:",
-//                 currentQ ? currentQ._id : "Not Found"
-//             );
-
-//             if (currentQ) {
-//                 nextQuestionId = getNextQuestion(lastAnswer.answer, currentQ);
-//                 console.log("➡️ Next Question ID:", nextQuestionId);
-//             }
-//         }
-
-//         // 🧠 STEP 6: Trigger Actions
-//         await generateActionsFromResponse(response, survey, req.tenantId);
-//         console.log("🤖 Actions generated successfully");
-
-//         res
-//             .status(201)
-//             .json({ message: "Survey submitted", response, nextQuestionId });
-//     } catch (err) {
-//         console.error("💥 Submission Controller Error:", err);
-//         next(err);
-//     }
-// };
 exports.submitSurveyResponse = async (req, res, next) => {
     console.log("📥 Entering submitSurveyResponse...");
     console.log("📥 Request Body:", req.body);
@@ -597,26 +464,6 @@ exports.submitSurveyResponse = async (req, res, next) => {
         // STEP 7: Trigger actions
         console.log("🤖 Calling generateActionsFromResponse...");
         await generateActionsFromResponse(response, survey, survey.tenant);
-        // Inside function:
-        let cleaned = aiResult.text
-            .replace(/```json/g, '')
-            .replace(/\n?```/g, '')
-            .trim();
-
-        try {
-            const parsed = JSON.parse(cleaned);
-            // use parsed
-        } catch {
-            // fallback action
-            await Action.create({
-                description: `Auto-generated: ${feedbackText.substring(0, 100)}...`,
-                priority: "high",
-                team: "Management",
-                category: "Customer Issue",
-                tenant: tenantId,
-                tags: ["auto-fallback"]
-            });
-        }
         console.log("✅ Actions generated!");
 
         res.status(201).json({ message: "Survey submitted", response, nextQuestionId });

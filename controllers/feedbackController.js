@@ -192,8 +192,12 @@ exports.analyzeFeedbackLogic = async (options, tenantId) => {
 
 function naiveSentiment(text) {
   const lower = (text || "").toLowerCase();
-  if (/(bad|poor|terrible|awful|disappoint|angry|hate)/.test(lower)) return "negative";
-  if (/(good|great|excellent|love|awesome|satisfied|happy)/.test(lower)) return "positive";
+  const negative = /(bad|poor|terrible|awful|disappoint|angry|hate|dissatisfied)/.test(lower);
+  const positive = /(good|great|excellent|love|awesome|satisfied|happy|very awesome)/.test(lower);
+  
+  if (negative && positive) return "mixed"; // NEW
+  if (negative) return "negative";
+  if (positive) return "positive";
   return "neutral";
 }
 
@@ -372,4 +376,10 @@ exports.followUp = async ({ actionIds, messageTemplate, method = "email" }) => {
     console.error("💥 Error in followUp:", err.message);
     throw err;
   }
+};
+
+// feedbackController.js
+const sendSurveyWhatsApp = async ({ feedbackId, messageType }) => {
+    console.log("📱 WhatsApp Thank-you (dummy):", { feedbackId, messageType });
+    // Later: Integrate Twilio/WhatsApp API
 };
