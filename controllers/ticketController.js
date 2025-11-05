@@ -79,9 +79,7 @@ exports.createTicket = async (req, res, next) => {
 
         const { subject, description, category, email } = req.body;
         const createdBy = req.user._id;
-        console.log("Debug: Creating ticket for user:", req.user);
         const tenantId = req.user.tenant || req.tenantId;
-        console.log("Debug: Tenant ID:", tenantId);
 
         // Handle file attachments
         let attachments = [];
@@ -138,7 +136,6 @@ exports.createTicket = async (req, res, next) => {
             .populate("createdBy", "name email avatar")
             .populate("tenantId", "name domain");
 
-        console.log("Debug: Ticket created successfully:", populatedTicket);
         // Send notification email to admins (optional)
         try {
             const adminUsers = await User.find({
@@ -146,7 +143,6 @@ exports.createTicket = async (req, res, next) => {
                 tenant: tenantId,
                 isActive: true
             });
-            console.log("Debug: Found admin users for notification:", adminUsers);
 
             if (adminUsers.length > 0) {
                 const adminEmails = adminUsers.map(admin => admin.email);
@@ -303,13 +299,6 @@ exports.getTicketById = async (req, res, next) => {
             return res.status(404).json({ success: false, message: "Ticket not found" });
         }
 
-        console.log("🔍 Debug Ticket Access:");
-        console.log("User Role:", req.user.role);
-        console.log("User ID:", req.user._id);
-        console.log("User Tenant ID:", tenantId?.toString());
-        console.log("Ticket Tenant ID:", ticket.tenantId?.toString());
-        console.log("Ticket CreatedBy:", ticket.createdBy?._id?.toString());
-
         // Permission logic
         let hasAccess = false;
 
@@ -324,7 +313,6 @@ exports.getTicketById = async (req, res, next) => {
         }
 
         if (!hasAccess) {
-            console.log("🚫 Access denied — failed permission check.");
             return res.status(403).json({
                 success: false,
                 message: "Access denied. You don't have permission to view this ticket."
@@ -480,19 +468,15 @@ exports.updateTicketStatus = async (req, res) => {
     try {
         const ticketId = req.params.id;
         const { status } = req.body;
-        console.log("Update Ticket Status Request:", { ticketId, status, user: req.user });
         if (!status) {
             return res.status(400).json({ message: "Status is required" });
         }
-        console.log("Validated status:", status);
         const ticket = await Ticket.findById(ticketId);
         if (!ticket) return res.status(404).json({ message: "Ticket not found" });
 
         // Safely check tenantId
         const ticketTenantId = ticket.tenantId?.toString();
         const userTenantId = req.tenantId;
-        console.log("Ticket Tenant ID:", ticketTenantId);
-        console.log("User Tenant ID:", userTenantId);
         // If responder is system admin → skip tenant check
         if (req.user.role !== 'admin') {  // "admin" here = system admin
             // Only do tenant validation for company members/admins
@@ -503,7 +487,7 @@ exports.updateTicketStatus = async (req, res) => {
                 return res.status(403).json({ message: "Access denied" });
             }
         }
-        console.log("Tenant validation passed");
+
         // Optional: normalize status
         const statusMap = {
             "Open": "open",
@@ -513,11 +497,9 @@ exports.updateTicketStatus = async (req, res) => {
             "Closed": "closed",
         };
         ticket.status = statusMap[status] || status.toLowerCase().trim();
-        console.log("Updated ticket status to:", ticket.status);
         await ticket.save();
 
         res.json({ success: true, ticket });
-        console.log("Ticket status updated successfully:", ticket);
     } catch (error) {
         console.error("Update ticket status error:", error);
         res.status(500).json({ message: "Internal server error" });
@@ -525,47 +507,136 @@ exports.updateTicketStatus = async (req, res) => {
 };
 
 // ✅ Delete Ticket
+// exports.deleteTicket = async (req, res, next) => {
+//     try {
+//         // Validate ticket ID
+//         const { error } = idSchema.validate({ id: req.params.id });
+//         if (error) {
+//             return res.status(400).json({
+//                 success: false,
+//                 message: error.details[0].message
+//             });
+//         }
+
+//         const ticketId = req.params.id;
+//         const tenantId = req.user.tenant || req.tenantId;
+
+//         // Find ticket
+//         const ticket = await Ticket.findById(req.params.id);
+//         if (!ticket) {
+//             return res.status(404).json({
+//                 success: false,
+//                 message: "Ticket not found"
+//             });
+//         }
+
+//         // Permission check
+//         let canDelete = false;
+//         if (req.user.role === "admin") {
+//             canDelete = true;
+//         } else if (req.user.role === "companyAdmin") {
+//             canDelete = ticket.tenantId.toString() === tenantId.toString();
+//         }
+//         // Note: Regular users typically shouldn't be able to delete tickets
+
+//         if (!canDelete) {
+//             return res.status(403).json({
+//                 success: false,
+//                 message: "Access denied. You don't have permission to delete this ticket."
+//             });
+//         }
+
+//         // Delete attachments from Cloudinary
+//         if (ticket.attachments && ticket.attachments.length > 0) {
+//             try {
+//                 for (const attachment of ticket.attachments) {
+//                     if (attachment.cloudinaryId) {
+//                         await cloudinary.uploader.destroy(attachment.cloudinaryId);
+//                     }
+//                 }
+//             } catch (cloudinaryError) {
+//                 console.error("❌ Error deleting attachments from Cloudinary:", cloudinaryError);
+//                 // Continue with ticket deletion even if file cleanup fails
+//             }
+//         }
+
+//         // Delete ticket
+//         await Ticket.findByIdAndDelete(ticketId);
+
+//         // Send deletion notification to ticket creator
+//         try {
+//             const deletionEmail = {
+//                 to: ticket.contactEmail,
+//                 subject: `Ticket Deleted: ${ticket.subject}`,
+//                 html: `
+//           <h3>Ticket Deletion Notification</h3>
+//           <p>Your support ticket has been deleted by an administrator.</p>
+//           <p><strong>Ticket:</strong> ${ticket.subject}</p>
+//           <p><strong>Deleted by:</strong> ${req.user.name}</p>
+//           <p><strong>Date:</strong> ${new Date().toLocaleString()}</p>
+//           <p>If you have any questions, please contact support.</p>
+//         `,
+//             };
+//             await sendEmail(deletionEmail);
+//         } catch (emailError) {
+//             console.error("❌ Deletion email error:", emailError);
+//         }
+
+//         res.status(200).json({
+//             success: true,
+//             message: "Ticket deleted successfully"
+//         });
+//     } catch (error) {
+//         console.error("❌ Error deleting ticket:", error);
+//         next(error);
+//     }
+// };
 exports.deleteTicket = async (req, res, next) => {
     try {
-        // Validate ticket ID
+        // ✅ Step 1: Validate ID
         const { error } = idSchema.validate({ id: req.params.id });
         if (error) {
+            console.warn("⚠️ ID validation failed:", error.details[0].message);
             return res.status(400).json({
                 success: false,
-                message: error.details[0].message
+                message: error.details[0].message,
             });
         }
 
         const ticketId = req.params.id;
-        const tenantId = req.user.tenant || req.tenantId;
+        const tenantId = req.user.tenant?._id || req.tenantId;
 
-        // Find ticket
-        const ticket = await Ticket.findById(req.params.id);
+        // ✅ Step 2: Find ticket
+        const ticket = await Ticket.findById(ticketId);
         if (!ticket) {
+            console.warn("⚠️ Ticket not found:", ticketId);
             return res.status(404).json({
                 success: false,
-                message: "Ticket not found"
+                message: "Ticket not found",
             });
         }
 
-        // Permission check
+        // ✅ Step 3: Permission check
         let canDelete = false;
         if (req.user.role === "admin") {
             canDelete = true;
         } else if (req.user.role === "companyAdmin") {
-            canDelete = ticket.tenantId.toString() === tenantId.toString();
+            canDelete = ticket.tenantId?.toString() === tenantId?.toString();
+        } else if (req.user.role === "user") {
+            canDelete = ticket.createdBy?.toString() === req.user._id.toString();
         }
-        // Note: Regular users typically shouldn't be able to delete tickets
 
         if (!canDelete) {
+            console.warn("🚫 Access denied for user:", req.user._id);
             return res.status(403).json({
                 success: false,
-                message: "Access denied. You don't have permission to delete this ticket."
+                message:
+                    "Access denied. You don't have permission to delete this ticket.",
             });
         }
 
-        // Delete attachments from Cloudinary
-        if (ticket.attachments && ticket.attachments.length > 0) {
+        // ✅ Step 4: Delete attachments (if any)
+        if (ticket.attachments?.length > 0) {
             try {
                 for (const attachment of ticket.attachments) {
                     if (attachment.cloudinaryId) {
@@ -574,14 +645,12 @@ exports.deleteTicket = async (req, res, next) => {
                 }
             } catch (cloudinaryError) {
                 console.error("❌ Error deleting attachments from Cloudinary:", cloudinaryError);
-                // Continue with ticket deletion even if file cleanup fails
             }
         }
-
-        // Delete ticket
+        // ✅ Step 5: Delete ticket
         await Ticket.findByIdAndDelete(ticketId);
 
-        // Send deletion notification to ticket creator
+        // ✅ Step 6: Send email notification
         try {
             const deletionEmail = {
                 to: ticket.contactEmail,
@@ -597,15 +666,17 @@ exports.deleteTicket = async (req, res, next) => {
             };
             await sendEmail(deletionEmail);
         } catch (emailError) {
-            console.error("❌ Deletion email error:", emailError);
+            console.error("❌ Error sending deletion email:", emailError);
         }
 
+        // ✅ Step 7: Response to client
         res.status(200).json({
             success: true,
-            message: "Ticket deleted successfully"
+            message: "Ticket deleted successfully",
         });
+
     } catch (error) {
-        console.error("❌ Error deleting ticket:", error);
+        console.error("❌ Unexpected error in deleteTicket:", error);
         next(error);
     }
 };
@@ -711,15 +782,6 @@ exports.addComment = async (req, res) => {
         const isAdmin = req.user.role === "admin";
         const isCompanyAdmin = req.user.role === "companyAdmin";
         const isCreator = ticket.createdBy.toString() === req.user._id.toString();
-
-        console.log("👀 [addComment] Permission Check:", {
-            tenantId,
-            isAdmin,
-            isCompanyAdmin,
-            isCreator,
-            ticketTenant: ticket.tenantId?.toString(),
-            userTenant: tenantId?.toString(),
-        });
 
         if (
             !isAdmin &&
