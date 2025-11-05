@@ -4,6 +4,7 @@ const jwt = require("jsonwebtoken");
 const User = require("../models/User");
 const Tenant = require("../models/Tenant");
 const OTP = require("../models/OTP");
+const UserCategory = require('../models/UserCategory');
 const Department = require("../models/Department")
 const Permission = require("../models/Permission");
 const sendEmail = require("../utils/sendEmail");
@@ -43,6 +44,7 @@ const createUserSchema = Joi.object({
   tenantName: Joi.string().min(2).max(100).optional(),
   department: Joi.string().optional(),
   tenant: Joi.string().optional(),
+  userCategories: Joi.array().items(Joi.string().hex().length(24)).optional(),
 });
 
 const updateUserSchema = Joi.object({
@@ -58,6 +60,7 @@ const updateUserSchema = Joi.object({
   }).optional(),
   role: Joi.string().valid("admin", "companyAdmin", "member").optional(),
   companyName: Joi.string().min(2).max(100).optional(),
+  userCategories: Joi.array().items(Joi.string().hex().length(24)).optional(),
 });
 
 const getAllUsersSchema = Joi.object({
@@ -97,7 +100,6 @@ const updateMeSchema = Joi.object({
 
 exports.bulkCreateUsers = async (req, res) => {
   try {
-
     const currentUser = req.user;
     if (currentUser.role !== 'companyAdmin') {
       return res.status(403).json({ message: 'Access denied: Only CompanyAdmin can perform bulk upload' });
@@ -113,7 +115,7 @@ exports.bulkCreateUsers = async (req, res) => {
     const rows = XLSX.utils.sheet_to_json(worksheet, { header: 1, blankrows: false });
 
     if (rows.length < 2) {
-      return res.status(400).json({ message: 'Empty or invalid Excel file' });
+      return res.status(400).json({ message: 'Empty or invalid Excel file. Must have at least one data row.' });
     }
 
     const dataRows = rows.slice(1);
@@ -124,49 +126,126 @@ exports.bulkCreateUsers = async (req, res) => {
       return res.status(403).json({ message: 'Access denied: No valid tenant associated' });
     }
 
-    // Collect unique departments
+    // ================================
+    // 1. DEPARTMENT MAPPING
+    // ================================
     const deptNamesSet = new Set();
     dataRows.forEach(row => {
       if (row[5]) deptNamesSet.add(row[5].toString().trim());
     });
 
     const uniqueDeptNames = Array.from(deptNamesSet);
+    const deptMap = new Map();
 
-    const existingDepts = await Department.find({ tenant: tenantId, name: { $in: uniqueDeptNames } });
+    if (uniqueDeptNames.length > 0) {
+      const existingDepts = await Department.find({ tenant: tenantId, name: { $in: uniqueDeptNames } });
+      existingDepts.forEach(dept => deptMap.set(dept.name, dept._id.toString()));
 
-    const deptMap = new Map(existingDepts.map(dept => [dept.name, dept._id.toString()]));
-
-    const missingDepts = uniqueDeptNames.filter(name => !deptMap.has(name));
-    if (missingDepts.length > 0) {
-      const newDepts = missingDepts.map(name => ({ tenant: tenantId, name, head: '' }));
-      const createdDepts = await Department.insertMany(newDepts);
-      createdDepts.forEach(dept => deptMap.set(dept.name, dept._id.toString()));
-      await Tenant.findByIdAndUpdate(tenantId, { $push: { departments: { $each: createdDepts.map(d => d._id) } } });
+      const missingDepts = uniqueDeptNames.filter(name => !deptMap.has(name));
+      if (missingDepts.length > 0) {
+        const newDepts = missingDepts.map(name => ({ tenant: tenantId, name, head: '' }));
+        const createdDepts = await Department.insertMany(newDepts);
+        createdDepts.forEach(dept => deptMap.set(dept.name, dept._id.toString()));
+        await Tenant.findByIdAndUpdate(tenantId, { $push: { departments: { $each: createdDepts.map(d => d._id) } } });
+      }
     }
 
-    // Process rows
+    // ================================
+    // 2. USER CATEGORY MAPPING (FIXED)
+    // ================================
+    const categoryNameMap = new Map();
+    let existingCats = []; // ← DECLARED OUTSIDE
+
+    const allCategoryNames = new Set();
+    dataRows.forEach(row => {
+      if (row[6]) {
+        const cats = row[6].toString().trim().split(',').map(c => c.trim());
+        cats.forEach(c => allCategoryNames.add(c));
+      }
+    });
+
+    if (allCategoryNames.size > 0) {
+      existingCats = await UserCategory.find({
+        tenant: tenantId,
+        name: { $in: Array.from(allCategoryNames) },
+        active: true,
+      });
+
+      existingCats.forEach(cat => categoryNameMap.set(cat.name, cat._id.toString()));
+    }
+
+    // ================================
+    // 3. PROCESS EACH ROW
+    // ================================
     const successes = [];
     const errors = [];
 
     for (const row of dataRows) {
-
+      // Minimum 6 columns: name, email, password, role, status, department
       if (row.length < 6) {
-        errors.push({ row: row.join(','), message: 'Invalid row length' });
+        errors.push({ row: row.join(','), message: 'Invalid row: less than 6 columns' });
         continue;
       }
 
-      const [name, email, password, role, statusStr, departmentName] = row.map(val => val.toString().trim());
+      const [
+        name,
+        email,
+        password,
+        role,
+        statusStr,
+        departmentName,
+        categoriesStr
+      ] = row.map(val => val?.toString().trim() || '');
+
+      // Parse categories
+      let userCategoryIds = [];
+      let userType = 'internal';
+
+      if (categoriesStr) {
+        const catNames = categoriesStr.split(',').map(c => c.trim()).filter(c => c);
+        if (catNames.length > 0) {
+          userCategoryIds = catNames
+            .map(name => categoryNameMap.get(name))
+            .filter(id => id);
+
+          if (catNames.length !== userCategoryIds.length) {
+            errors.push({ email, message: `Category not found: ${catNames.find(n => !categoryNameMap.has(n))}` });
+            continue;
+          }
+
+          // Determine userType
+          const hasExternal = userCategoryIds.some(id => {
+            const cat = existingCats.find(c => c._id.toString() === id);
+            return cat?.type === 'external';
+          });
+          userType = hasExternal ? 'external' : 'internal';
+        }
+      }
+
       const isActive = statusStr.toLowerCase() === 'active';
 
-      // Validation
-      const { error: validationError } = bulkUserSchema.validate({ name, email, password, isActive, role, department: departmentName });
+      // Validate schema
+      const { error: validationError } = bulkUserSchema.validate({
+        name,
+        email,
+        password,
+        isActive,
+        role,
+        department: departmentName
+      });
+
       if (validationError) {
         errors.push({ email, message: validationError.details[0].message });
         continue;
       }
 
       if (role !== 'member') {
-        errors.push({ email, message: 'Invalid role, must be member' });
+        errors.push({ email, message: 'Invalid role, must be "member"' });
+        continue;
+      }
+
+      if (!departmentName) {
+        errors.push({ email, message: 'Department name is required' });
         continue;
       }
 
@@ -178,12 +257,14 @@ exports.bulkCreateUsers = async (req, res) => {
 
       const deptId = deptMap.get(departmentName);
       if (!deptId) {
-        errors.push({ email, message: 'Department not found or created' });
+        errors.push({ email, message: 'Department not found or could not be created' });
         continue;
       }
 
+      // Hash password
       const hashedPassword = await bcrypt.hash(password, 10);
 
+      // Create user
       const newUser = await User.create({
         name,
         email,
@@ -199,10 +280,13 @@ exports.bulkCreateUsers = async (req, res) => {
         phone: '',
         bio: '',
         avatar: { public_id: '', url: '' },
+        userCategories: userCategoryIds,
+        userType,
         customRoles: [],
         surveyStats: null,
       });
 
+      // Send verification email
       const verificationCode = generateOTP();
       const expiresAt = moment().add(process.env.OTP_EXPIRE_MINUTES || 15, 'minutes').toDate();
       await OTP.create({ email, code: verificationCode, purpose: 'verify', expiresAt });
@@ -211,7 +295,6 @@ exports.bulkCreateUsers = async (req, res) => {
       const baseURL = baseURLs.public;
       const verificationLink = `${baseURL}/verify-email?code=${verificationCode}&email=${encodeURIComponent(email)}`;
 
-      // console.log("📧 Sending email to:", email);
       await sendEmail({
         to: email,
         subject: 'Verify your email - RatePro',
@@ -222,27 +305,33 @@ exports.bulkCreateUsers = async (req, res) => {
           <p><strong>Temporary Password:</strong> ${password}</p>
           <p>Please verify your email by clicking the link below:</p>
           <p><a href="${verificationLink}" target="_blank">${verificationLink}</a></p>
-          <p>This code will expire in ${process.env.OTP_EXPIRE_MINUTES} minute(s).</p>
+          <p>This code will expire in ${process.env.OTP_EXPIRE_MINUTES || 15} minute(s).</p>
           <br/>
-          <p>Regards,<br/>Team</p>
+          <p>Regards,<br/>Team RatePro</p>
         `,
       });
 
       successes.push({ id: newUser._id, email: newUser.email });
     }
 
+    // ================================
+    // 4. FINAL RESPONSE
+    // ================================
     res.status(201).json({
-      message: 'Bulk user creation processed',
+      message: 'Bulk user creation completed',
+      totalProcessed: dataRows.length,
       successful: successes.length,
-      errors: errors.length > 0 ? errors : null,
+      failed: errors.length,
       createdUsers: successes,
+      errors: errors.length > 0 ? errors : null,
     });
+
   } catch (err) {
-    console.error('💥 BulkCreateUsers error:', err);
+    console.error('BulkCreateUsers error:', err);
     if (err.code === 11000) {
-      return res.status(400).json({ message: 'Duplicate key error (e.g., email)' });
+      return res.status(400).json({ message: 'Duplicate email found in database' });
     }
-    res.status(500).json({ message: 'Internal Server Error' });
+    res.status(500).json({ message: 'Internal Server Error', error: err.message });
   }
 };
 
@@ -315,6 +404,30 @@ exports.createUser = async (req, res) => {
       }
     }
 
+    // --- USER CATEGORIES VALIDATION ---
+    let userCategories = [];
+    if (req.body.userCategories && req.body.userCategories.length > 0) {
+      const categoryIds = req.body.userCategories;
+
+      const validCategories = await UserCategory.find({
+        _id: { $in: categoryIds },
+        tenant: tenantId,
+        active: true,
+      });
+
+      if (validCategories.length !== categoryIds.length) {
+        return res.status(400).json({ message: 'Invalid or unauthorized user categories' });
+      }
+
+      userCategories = validCategories.map(c => c._id);
+
+      // Auto-set userType based on categories
+      const hasExternal = validCategories.some(c => c.type === 'external');
+      if (hasExternal && role === 'member') {
+        // member can be external
+      }
+    }
+
     // Hash password
     const hashedPassword = await bcrypt.hash(password, 10);
 
@@ -356,6 +469,10 @@ exports.createUser = async (req, res) => {
         department: role === 'member' ? department : null,
         isVerified: false,
         createdBy: currentUser._id,
+        userCategories,
+        userType: userCategories.some(id => validCategories.find(c => c._id.toString() === id.toString())?.type === 'external')
+          ? 'external'
+          : 'internal',
       });
     }
 
@@ -434,6 +551,27 @@ exports.updateUser = async (req, res, next) => {
       if (user.tenant._id.toString() !== req.user.tenant._id.toString()) {
         return res.status(403).json({ message: "Access denied: Cannot update users from a different tenant" });
       }
+    }
+
+    // --- USER CATEGORIES UPDATE ---
+    if (updates.userCategories) {
+      const categoryIds = updates.userCategories;
+
+      const validCategories = await UserCategory.find({
+        _id: { $in: categoryIds },
+        tenant: user.tenant?._id || req.tenantId,
+        active: true,
+      });
+
+      if (validCategories.length !== categoryIds.length) {
+        return res.status(400).json({ message: 'Invalid user categories' });
+      }
+
+      updates.userCategories = validCategories.map(c => c._id);
+
+      // Update userType
+      const hasExternal = validCategories.some(c => c.type === 'external');
+      updates.userType = hasExternal ? 'external' : 'internal';
     }
 
     // ----- ROLE BASED FIELD CONTROL -----
@@ -697,7 +835,7 @@ exports.getAllUsers = async (req, res, next) => {
 
     const users = await User.find(query)
       .select("-password")
-      .populate("tenant customRoles department")
+      .populate("tenant customRoles department userCategories")
       .sort({ [sort]: -1 })
       .skip((page - 1) * limit)
       .limit(parseInt(limit));
@@ -1034,88 +1172,197 @@ exports.updateMe = async (req, res, next) => {
   }
 };
 
-
-// exports.updateMe = async (req, res, next) => {
+// exports.bulkCreateUsers = async (req, res) => {
 //   try {
-//     // ----------------- VALIDATION -----------------
-//     const { error } = updateMeSchema.validate(req.body);
-//     if (error) return res.status(400).json({ message: error.details[0].message });
 
-//     // ----------------- JWT VERIFY -----------------
-//     const token = req.cookies?.accessToken;
-//     if (!token) return res.status(401).json({ message: "No token provided" });
+//     const currentUser = req.user;
+//     if (currentUser.role !== 'companyAdmin') {
+//       return res.status(403).json({ message: 'Access denied: Only CompanyAdmin can perform bulk upload' });
+//     }
 
-//     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-//     const userId = decoded.id;
+//     if (!req.file) {
+//       return res.status(400).json({ message: 'No Excel file uploaded' });
+//     }
 
-//     // ----------------- FETCH USER -----------------
-//     const user = await User.findById(userId).populate("tenant");
-//     if (!user) return res.status(404).json({ message: "User not found" });
+//     const workbook = XLSX.read(req.file.buffer, { type: 'buffer' });
+//     const sheetName = workbook.SheetNames[0];
+//     const worksheet = workbook.Sheets[sheetName];
+//     const rows = XLSX.utils.sheet_to_json(worksheet, { header: 1, blankrows: false });
 
-//     // ----------------- UPDATE USER FIELDS -----------------
-//     const fieldsToUpdate = ["name", "email", "phone", "bio", "department"];
-//     fieldsToUpdate.forEach((field) => {
-//       if (req.body[field] !== undefined) user[field] = req.body[field];
+//     if (rows.length < 2) {
+//       return res.status(400).json({ message: 'Empty or invalid Excel file' });
+//     }
+
+//     const dataRows = rows.slice(1);
+//     const tenantId = currentUser.tenant._id ? currentUser.tenant._id.toString() : currentUser.tenant;
+
+//     const tenantData = await Tenant.findById(tenantId).populate('departments');
+//     if (!tenantId || !tenantData) {
+//       return res.status(403).json({ message: 'Access denied: No valid tenant associated' });
+//     }
+
+//     // Collect unique departments
+//     const deptNamesSet = new Set();
+//     dataRows.forEach(row => {
+//       if (row[5]) deptNamesSet.add(row[5].toString().trim());
 //     });
 
-//     // ----------------- TENANT/COMPANY UPDATE (only for companyAdmin) -----------------
-//     if (req.body.tenant && user.role === "companyAdmin") {
-//       let tenant = await Tenant.findById(user.tenant?._id);
-//       if (!tenant) return res.status(404).json({ message: "Tenant not found" });
+//     const uniqueDeptNames = Array.from(deptNamesSet);
 
-//       const tenantUpdates = req.body.tenant;
-//       Object.assign(tenant, {
-//         name: tenantUpdates.name ?? tenant.name,
-//         address: tenantUpdates.address ?? tenant.address,
-//         contactEmail: tenantUpdates.contactEmail ?? tenant.contactEmail,
-//         contactPhone: tenantUpdates.contactPhone ?? tenant.contactPhone,
-//         website: tenantUpdates.website ?? tenant.website,
-//         totalEmployees: tenantUpdates.totalEmployees ?? tenant.totalEmployees,
-//         departments: tenantUpdates.departments ?? tenant.departments,
-//       });
-//       await tenant.save();
+//     const existingDepts = await Department.find({ tenant: tenantId, name: { $in: uniqueDeptNames } });
+
+//     const deptMap = new Map(existingDepts.map(dept => [dept.name, dept._id.toString()]));
+
+//     const missingDepts = uniqueDeptNames.filter(name => !deptMap.has(name));
+//     if (missingDepts.length > 0) {
+//       const newDepts = missingDepts.map(name => ({ tenant: tenantId, name, head: '' }));
+//       const createdDepts = await Department.insertMany(newDepts);
+//       createdDepts.forEach(dept => deptMap.set(dept.name, dept._id.toString()));
+//       await Tenant.findByIdAndUpdate(tenantId, { $push: { departments: { $each: createdDepts.map(d => d._id) } } });
 //     }
 
-//     // ----------------- AVATAR UPLOAD -----------------
-//     if (req.file) {
-//       if (user.avatar?.public_id) {
-//         await cloudinary.uploader.destroy(user.avatar.public_id);
+//     // --- CATEGORY MAPPING (New) ---
+//     const categoryNameMap = new Map(); // "Vendor" → ObjectId
+
+//     // Collect all category names from rows
+//     const allCategoryNames = new Set();
+//     dataRows.forEach(row => {
+//       if (row[6]) {
+//         const cats = row[6].toString().trim().split(',').map(c => c.trim());
+//         cats.forEach(c => allCategoryNames.add(c));
+//       }
+//     });
+
+//     if (allCategoryNames.size > 0) {
+//       const existingCats = await UserCategory.find({
+//         tenant: tenantId,
+//         name: { $in: Array.from(allCategoryNames) },
+//         active: true,
+//       });
+
+//       existingCats.forEach(cat => categoryNameMap.set(cat.name, cat._id.toString()));
+//     }
+
+//     // Process rows
+//     const successes = [];
+//     const errors = [];
+
+//     for (const row of dataRows) {
+
+//       if (row.length < 6) {
+//         errors.push({ row: row.join(','), message: 'Invalid row length' });
+//         continue;
 //       }
 
-//       const uploadResult = await cloudinary.uploader.upload(req.file.path, {
-//         folder: "avatars",
-//         width: 300,
-//         crop: "scale",
+//       const [name, email, password, role, statusStr, departmentName, categoriesStr] = row.map(val => val.toString().trim());
+//       // Parse categories
+//       let userCategoryIds = [];
+//       if (categoriesStr) {
+//         const catNames = categoriesStr.split(',').map(c => c.trim());
+//         userCategoryIds = catNames
+//           .map(name => categoryNameMap.get(name))
+//           .filter(id => id); // only valid ones
+
+//         if (catNames.length !== userCategoryIds.length) {
+//           errors.push({ email, message: 'One or more categories not found' });
+//           continue;
+//         }
+//       }
+
+//       // Determine userType
+//       const hasExternalCat = userCategoryIds.some(id => {
+//         const cat = existingCats.find(c => c._id.toString() === id);
+//         return cat?.type === 'external';
 //       });
-//       fs.unlinkSync(req.file.path);
-//       user.avatar = { public_id: uploadResult.public_id, url: uploadResult.secure_url };
+//       const userType = hasExternalCat ? 'external' : 'internal';
+//       const isActive = statusStr.toLowerCase() === 'active';
+
+//       // Validation
+//       const { error: validationError } = bulkUserSchema.validate({ name, email, password, isActive, role, department: departmentName });
+//       if (validationError) {
+//         errors.push({ email, message: validationError.details[0].message });
+//         continue;
+//       }
+
+//       if (role !== 'member') {
+//         errors.push({ email, message: 'Invalid role, must be member' });
+//         continue;
+//       }
+
+//       const existingUser = await User.findOne({ email });
+//       if (existingUser) {
+//         errors.push({ email, message: 'User already exists with this email' });
+//         continue;
+//       }
+
+//       const deptId = deptMap.get(departmentName);
+//       if (!deptId) {
+//         errors.push({ email, message: 'Department not found or created' });
+//         continue;
+//       }
+
+//       const hashedPassword = await bcrypt.hash(password, 10);
+
+//       const newUser = await User.create({
+//         name,
+//         email,
+//         password: hashedPassword,
+//         role: 'member',
+//         authProvider: 'local',
+//         tenant: tenantId,
+//         department: deptId,
+//         isVerified: false,
+//         isActive,
+//         createdBy: currentUser._id,
+//         deleted: false,
+//         phone: '',
+//         bio: '',
+//         avatar: { public_id: '', url: '' },
+//         userCategories: userCategoryIds,
+//         userType,
+//         customRoles: [],
+//         surveyStats: null,
+//       });
+
+//       const verificationCode = generateOTP();
+//       const expiresAt = moment().add(process.env.OTP_EXPIRE_MINUTES || 15, 'minutes').toDate();
+//       await OTP.create({ email, code: verificationCode, purpose: 'verify', expiresAt });
+
+//       const baseURLs = getBaseURL();
+//       const baseURL = baseURLs.public;
+//       const verificationLink = `${baseURL}/verify-email?code=${verificationCode}&email=${encodeURIComponent(email)}`;
+
+//       // console.log("📧 Sending email to:", email);
+//       await sendEmail({
+//         to: email,
+//         subject: 'Verify your email - RatePro',
+//         html: `
+//           <p>Hello ${name},</p>
+//           <p>Your account has been successfully created.</p>
+//           <p><strong>Login Email:</strong> ${email}</p>
+//           <p><strong>Temporary Password:</strong> ${password}</p>
+//           <p>Please verify your email by clicking the link below:</p>
+//           <p><a href="${verificationLink}" target="_blank">${verificationLink}</a></p>
+//           <p>This code will expire in ${process.env.OTP_EXPIRE_MINUTES} minute(s).</p>
+//           <br/>
+//           <p>Regards,<br/>Team</p>
+//         `,
+//       });
+
+//       successes.push({ id: newUser._id, email: newUser.email });
 //     }
 
-//     await user.save();
-
-//     // ----------------- SAFE USER OBJECT -----------------
-//     const safeUser = {
-//       _id: user._id,
-//       name: user.name,
-//       email: user.email,
-//       phone: user.phone,
-//       bio: user.bio,
-//       role: user.role,
-//       customRoles: user.customRoles,
-//       authProvider: user.authProvider,
-//       isActive: user.isActive,
-//       isVerified: user.isVerified,
-//       tenant: user.tenant,
-//       department: user.department,
-//       avatar: user.avatar,
-//       createdAt: user.createdAt,
-//       updatedAt: user.updatedAt,
-//     };
-
-//     res.status(200).json({ message: "Profile updated successfully", user: safeUser });
+//     res.status(201).json({
+//       message: 'Bulk user creation processed',
+//       successful: successes.length,
+//       errors: errors.length > 0 ? errors : null,
+//       createdUsers: successes,
+//     });
 //   } catch (err) {
-//     console.error("updateMe error:", err);
-//     next(err);
+//     console.error('💥 BulkCreateUsers error:', err);
+//     if (err.code === 11000) {
+//       return res.status(400).json({ message: 'Duplicate key error (e.g., email)' });
+//     }
+//     res.status(500).json({ message: 'Internal Server Error' });
 //   }
 // };
-

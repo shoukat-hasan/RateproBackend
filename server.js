@@ -6,12 +6,13 @@ const cookieParser = require("cookie-parser");
 const cors = require("cors");
 const path = require("path");
 const { globalLimiter } = require("./middlewares/rateLimiter");
-const seedPermissions = require("./seeds/seedPermissions");
+const seedUserCategories = require("./seeds/seedUserCategories");
 
 // MongoDB connection and seeding
 const startServer = async () => {
   try {
     await connectDB();
+    // await seedUserCategories();
     // await seedSurveyTemplates();
     // await seedPermissions(); // Run permission seeding after DB connection
   } catch (err) {
@@ -62,6 +63,7 @@ app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 // // Routes
 app.use("/api/auth", require("./routes/authRoutes"));
 app.use("/api/users", require("./routes/userRoutes"));
+app.use("/api/user-categories", require("./routes/userCategoryRoutes"));
 app.use('/api/tenants', require("./routes/tenantRoutes"));
 app.use("/api/roles", require("./routes/roleRoutes"));
 app.use("/api/permissions", require("./routes/permissionRoutes.js"));
@@ -78,6 +80,8 @@ app.use("/api/insights", require("./routes/insightRoutes"));
 app.use("/api/feedback", require("./routes/feedbackRoutes"));
 app.use("/api/distribution", require("./routes/distributionRoutes"));
 app.use("/api/dashboard", require("./routes/dashboardRoutes"));
+app.use("/api/tickets", require("./routes/ticketRoutes"));
+app.use("/api/email-templates", require("./routes/emailTemplateRoutes.js"));
 
 // Error Handling Middleware
 const { notFound, errorHandler } = require("./middlewares/errorHandler");

@@ -56,6 +56,12 @@ const userSchema = new mongoose.Schema({
     type: Boolean,
     default: true,
   },
+  userType: {
+    type: String,
+    enum: ['internal', 'external'],
+    default: 'internal'
+  },
+  userCategories: [{ type: mongoose.Schema.Types.ObjectId, ref: 'UserCategory' }],
   deactivatedBy: { type: String, enum: ["admin", "companyAdmin", "member", null], default: null },
   // Auth Tokens
   resetPasswordToken: String,
