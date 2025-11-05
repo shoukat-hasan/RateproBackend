@@ -166,9 +166,12 @@ exports.bulkCreateUsers = async (req, res) => {
 
     if (allCategoryNames.size > 0) {
       existingCats = await UserCategory.find({
-        tenant: tenantId,
         name: { $in: Array.from(allCategoryNames) },
         active: true,
+        $or: [
+          { tenant: tenantId },
+          { tenant: null },
+        ],
       });
 
       existingCats.forEach(cat => categoryNameMap.set(cat.name, cat._id.toString()));
@@ -337,6 +340,7 @@ exports.bulkCreateUsers = async (req, res) => {
 
 exports.createUser = async (req, res) => {
   try {
+    console.log("➡️ Incoming userCategories:", req.body.userCategories);
     // Validate request
     const { error } = createUserSchema.validate(req.body);
     if (error) {
@@ -406,13 +410,22 @@ exports.createUser = async (req, res) => {
 
     // --- USER CATEGORIES VALIDATION ---
     let userCategories = [];
+    let validCategories = [];
     if (req.body.userCategories && req.body.userCategories.length > 0) {
       const categoryIds = req.body.userCategories;
 
-      const validCategories = await UserCategory.find({
+      // const validCategories = await UserCategory.find({
+      //   _id: { $in: categoryIds },
+      //   tenant: tenantId,
+      //   active: true,
+      // });
+      validCategories = await UserCategory.find({
         _id: { $in: categoryIds },
-        tenant: tenantId,
         active: true,
+        $or: [
+          { tenant: tenantId },
+          { tenant: null },
+        ],
       });
 
       if (validCategories.length !== categoryIds.length) {
@@ -522,6 +535,7 @@ exports.createUser = async (req, res) => {
 
 exports.updateUser = async (req, res, next) => {
   try {
+    console.log("➡️ Incoming userCategories:", req.body.userCategories);
     const { id } = req.params;
     let updates = { ...req.body };
 
@@ -529,6 +543,9 @@ exports.updateUser = async (req, res, next) => {
     if (!user) {
       return res.status(404).json({ message: "User not found" });
     }
+
+    // ✅ Determine tenantId safely
+    let tenantId = user.tenant?._id?.toString() || user.tenant;
 
     // --- Member custom role restrictions ---
     if (req.user.role === "member") {
@@ -553,14 +570,19 @@ exports.updateUser = async (req, res, next) => {
       }
     }
 
+    let validCategories = [];
+
     // --- USER CATEGORIES UPDATE ---
     if (updates.userCategories) {
       const categoryIds = updates.userCategories;
 
-      const validCategories = await UserCategory.find({
+      validCategories = await UserCategory.find({
         _id: { $in: categoryIds },
-        tenant: user.tenant?._id || req.tenantId,
         active: true,
+        $or: [
+          { tenant: tenantId },
+          { tenant: null },
+        ],
       });
 
       if (validCategories.length !== categoryIds.length) {
@@ -576,17 +598,17 @@ exports.updateUser = async (req, res, next) => {
 
     // ----- ROLE BASED FIELD CONTROL -----
     if (req.user.role === "admin") {
-      const allowedFields = ["name", "role", "isActive", "companyName"];
+      const allowedFields = ["name", "role", "isActive", "companyName", "userCategories", "userType"];
       Object.keys(updates).forEach((key) => {
         if (!allowedFields.includes(key)) delete updates[key];
       });
     } else if (req.user.role === "companyAdmin") {
-      const allowedFields = ["name", "isActive", "department"];
+      const allowedFields = ["name", "isActive", "department", "userCategories", "userType"];
       Object.keys(updates).forEach((key) => {
         if (!allowedFields.includes(key)) delete updates[key];
       });
     } else if (req.user.role === "member") {
-      const allowedFields = ["name", "isActive"];
+      const allowedFields = ["name", "isActive", "userCategories", "userType"];
       Object.keys(updates).forEach((key) => {
         if (!allowedFields.includes(key)) delete updates[key];
       });

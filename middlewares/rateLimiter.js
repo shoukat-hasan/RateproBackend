@@ -13,7 +13,7 @@ exports.globalLimiter = rateLimit({
 
 exports.authLimiter = rateLimit({
   windowMs: 10 * 60 * 1000, // 10 min
-  max: 5, // max 5 OTP/logins/regs per IP
+  max: 10, // max 10 OTP/logins/regs per IP
   message: {
     status: 429,
     message: "Too many auth attempts. Please wait and try again.",
