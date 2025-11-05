@@ -591,9 +591,14 @@ exports.updateUser = async (req, res, next) => {
 
       updates.userCategories = validCategories.map(c => c._id);
 
-      // Update userType
+      // ✅ Update userType based on category type
       const hasExternal = validCategories.some(c => c.type === 'external');
       updates.userType = hasExternal ? 'external' : 'internal';
+
+      // ✅ NEW: Clear department if user became external
+      if (hasExternal) {
+        updates.department = null; // or undefined (depends on your schema)
+      }
     }
 
     // ----- ROLE BASED FIELD CONTROL -----
