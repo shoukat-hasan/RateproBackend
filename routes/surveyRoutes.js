@@ -60,6 +60,7 @@ router.use(setTenantId);
 
 // 🧠 ADMIN ROUTES (Full Access — no permission checks)
 router.post("/create", tenantCheck, allowRoles("admin", "companyAdmin"), allowPermission("survey:create"), upload.single("logo"), createSurvey);
+router.post("/save-draft", tenantCheck, allowRoles("admin", "companyAdmin"), allowPermission("survey:create"), upload.single("logo"), createSurvey);
 router.get("/", tenantCheck, allowRoles("admin", "companyAdmin"), allowPermission("survey:read"), getAllSurveys);
 router.get("/:id", tenantCheck, allowRoles("admin", "companyAdmin"), allowPermission("survey:detail:view"), getSurveyById);
 router.put("/:id", tenantCheck, allowRoles("admin", "companyAdmin"), allowPermission("survey:settings:update"), upload.single("logo"), updateSurvey);

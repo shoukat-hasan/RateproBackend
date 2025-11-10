@@ -4,6 +4,7 @@ const WhatsAppSetting = require('../models/WhatsAppSetting');
 const sendWhatsApp = require('../utils/sendWhatsApp');
 const Joi = require('joi');
 const Tenant = require('../models/Tenant');
+const Logger = require("../utils/auditLog");
 
 const sendSchema = Joi.object({
   surveyId: Joi.string().hex().length(24).required(),
@@ -12,6 +13,7 @@ const sendSchema = Joi.object({
   viaTenantDefault: Joi.boolean().optional().default(true), // use tenant settings if recipients not provided
 });
 
+// Send survey via WhatsApp
 exports.sendSurveyWhatsApp = async (req, res, next) => {
   try {
     const { error, value } = sendSchema.validate(req.body);
@@ -22,13 +24,10 @@ exports.sendSurveyWhatsApp = async (req, res, next) => {
     const survey = await Survey.findById(surveyId);
     if (!survey || survey.deleted) return res.status(404).json({ message: 'Survey not found' });
 
-    // Compose link (frontend route)
     const link = `${process.env.FRONTEND_URL}/take-survey/${survey._id}`;
     const defaultMsg = messageTemplate || `Please take this quick survey: ${link}`;
 
-    // Determine recipients
     let toList = providedRecipients || [];
-
     if ((!toList || toList.length === 0) && viaTenantDefault) {
       const tenant = await Tenant.findById(req.tenantId).select("contacts");
       if (tenant?.contacts?.length > 0) {
@@ -40,7 +39,6 @@ exports.sendSurveyWhatsApp = async (req, res, next) => {
       return res.status(400).json({ message: 'No recipients provided. Provide recipients or enable tenant contacts.' });
     }
 
-    // Fetch tenant-specific WhatsApp config
     const waSetting = await WhatsAppSetting.findOne({ tenant: req.tenantId, isActive: true });
     const config = waSetting ? {
       provider: waSetting.provider,
@@ -48,7 +46,6 @@ exports.sendSurveyWhatsApp = async (req, res, next) => {
       meta: waSetting.meta,
     } : null;
 
-    // Bulk send
     const results = [];
     for (const to of toList) {
       try {
@@ -60,8 +57,11 @@ exports.sendSurveyWhatsApp = async (req, res, next) => {
       }
     }
 
+    await Logger.info('sendSurveyWhatsApp', 'Survey WhatsApp messages attempted', { tenantId: req.tenantId, surveyId, recipients: toList.length });
     res.status(200).json({ message: 'Send attempted', results });
   } catch (err) {
+    console.error('sendSurveyWhatsApp error:', err);
+    await Logger.error('sendSurveyWhatsApp', 'Failed to send survey WhatsApp', { tenantId: req.tenantId, message: err.message, stack: err.stack });
     next(err);
   }
 };
@@ -73,10 +73,19 @@ exports.sendSurveyWhatsApp = async (req, res, next) => {
  *
  * Minimal implementation: verify and log, then respond 200.
  */
+
+// WhatsApp webhook handler
 exports.whatsappWebhook = async (req, res) => {
-  // Twilio will POST: MessageStatusCallback (various fields); Meta will POST messages differently.
-  // For now log the body and respond.
-  console.log('WhatsApp webhook received:', JSON.stringify(req.body).slice(0, 2000));
-  // TODO: implement provider-specific parsing and update message status in DB if storing
-  res.status(200).send('OK');
+  try {
+    console.log('WhatsApp webhook received:', JSON.stringify(req.body).slice(0, 2000));
+    await Logger.info('whatsappWebhook', 'Received WhatsApp webhook', { body: req.body });
+
+    // TODO: provider-specific parsing and status update
+
+    res.status(200).send('OK');
+  } catch (err) {
+    console.error('WhatsApp webhook error:', err);
+    await Logger.error('whatsappWebhook', 'Error handling WhatsApp webhook', { message: err.message, stack: err.stack });
+    res.status(500).send('Error');
+  }
 };

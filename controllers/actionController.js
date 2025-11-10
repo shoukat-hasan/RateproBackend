@@ -7,6 +7,7 @@ const aiClient = require("../utils/aiClient");
 const { sendNotification } = require("../utils/sendNotification");
 const Joi = require("joi");
 const followUp = require("./feedbackController")
+const Logger = require("../utils/auditLog");
 
 // Validation schemas
 const createActionSchema = Joi.object({
@@ -58,7 +59,7 @@ exports.createAction = async (req, res, next) => {
 
     const { feedbackId, description, priority, assignedTo, team, dueDate, tags, category } = value;
 
-    // Validate feedback exists if provided
+    // Validate feedback
     if (feedbackId) {
       const feedback = await FeedbackAnalysis.findById(feedbackId);
       if (!feedback || feedback.tenant.toString() !== req.user.tenant.toString()) {
@@ -69,7 +70,7 @@ exports.createAction = async (req, res, next) => {
       }
     }
 
-    // Validate assignee exists if provided
+    // Validate assignee
     if (assignedTo) {
       const assignee = await User.findById(assignedTo);
       if (!assignee || assignee.tenant.toString() !== req.user.tenant.toString()) {
@@ -80,21 +81,12 @@ exports.createAction = async (req, res, next) => {
       }
     }
 
-    // Set auto due date based on priority
+    // Auto due date
     let autoDueDate = dueDate;
     if (!autoDueDate) {
       const now = new Date();
-      switch (priority) {
-        case "high":
-          autoDueDate = new Date(now.getTime() + 24 * 60 * 60 * 1000); // 24 hours
-          break;
-        case "medium":
-          autoDueDate = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000); // 7 days
-          break;
-        case "long-term":
-          autoDueDate = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000); // 30 days
-          break;
-      }
+      const priorities = { high: 1, medium: 7, "long-term": 30 };
+      autoDueDate = new Date(now.getTime() + (priorities[priority] || 7) * 24 * 60 * 60 * 1000);
     }
 
     const action = await Action.create({
@@ -116,7 +108,7 @@ exports.createAction = async (req, res, next) => {
       { path: "createdBy", select: "name email" }
     ]);
 
-    // Send notification to assignee if assigned
+    // Send notification if assigned
     if (assignedTo) {
       await sendNotification({
         userId: assignedTo,
@@ -126,7 +118,17 @@ exports.createAction = async (req, res, next) => {
       });
     }
 
-    await updateDashboardMetrics(tenantId);
+    await updateDashboardMetrics(req.user.tenant);
+
+    // ✅ Only log when success
+    await Logger.info("createAction", "Action created successfully", {
+      status: "success",
+      userId: req.user._id,
+      actionId: action._id,
+      tenantId: req.user.tenant,
+      priority,
+      assignedTo
+    });
 
     res.status(201).json({
       success: true,
@@ -135,7 +137,20 @@ exports.createAction = async (req, res, next) => {
     });
 
   } catch (error) {
-    next(error);
+    // ❌ Only log on error
+    await Logger.error("createAction", "Error creating action", {
+      status: "error",
+      error: error.message,
+      stack: error.stack,
+      userId: req.user?._id,
+      body: req.body
+    });
+
+    res.status(500).json({
+      success: false,
+      message: "Error creating action",
+      error: error.message
+    });
   }
 };
 
@@ -162,25 +177,11 @@ exports.getActions = async (req, res, next) => {
     // Build filter query
     const filter = { tenant: req.user.tenant };
 
-    if (priority && priority !== "all") {
-      filter.priority = priority;
-    }
-
-    if (status && status !== "all") {
-      filter.status = status;
-    }
-
-    if (assignedTo && assignedTo !== "all") {
-      filter.assignedTo = assignedTo;
-    }
-
-    if (team && team !== "all") {
-      filter.team = new RegExp(team, "i");
-    }
-
-    if (category && category !== "all") {
-      filter.category = new RegExp(category, "i");
-    }
+    if (priority && priority !== "all") filter.priority = priority;
+    if (status && status !== "all") filter.status = status;
+    if (assignedTo && assignedTo !== "all") filter.assignedTo = assignedTo;
+    if (team && team !== "all") filter.team = new RegExp(team, "i");
+    if (category && category !== "all") filter.category = new RegExp(category, "i");
 
     if (search) {
       filter.$or = [
@@ -231,7 +232,16 @@ exports.getActions = async (req, res, next) => {
       }
     ]);
 
-    res.json({
+    // ✅ Success log
+    await Logger.info("getActions", "Fetched actions successfully", {
+      status: "success",
+      userId: req.user._id,
+      tenantId: req.user.tenant,
+      total: totalActions,
+      filters: req.query
+    });
+
+    res.status(200).json({
       success: true,
       data: {
         actions,
@@ -249,7 +259,20 @@ exports.getActions = async (req, res, next) => {
     });
 
   } catch (error) {
-    next(error);
+    // ❌ Error log
+    await Logger.error("getActions", "Error fetching actions", {
+      status: "error",
+      error: error.message,
+      stack: error.stack,
+      userId: req.user?._id,
+      query: req.query
+    });
+
+    res.status(500).json({
+      success: false,
+      message: "Error fetching actions",
+      error: error.message
+    });
   }
 };
 
@@ -274,19 +297,41 @@ exports.getActionById = async (req, res, next) => {
     ]);
 
     if (!action) {
+      await Logger.warn("getActionById", "Action not found", {
+        actionId: req.params.id,
+        tenant: req.user.tenant,
+        userId: req.user?._id
+      });
+
       return res.status(404).json({
         success: false,
         message: "Action not found"
       });
     }
 
-    res.json({
+    await Logger.info("getActionById", "Fetched action successfully", {
+      actionId: req.params.id,
+      tenant: req.user.tenant,
+      userId: req.user?._id
+    });
+
+    res.status(200).json({
       success: true,
       data: action
     });
-
   } catch (error) {
-    next(error);
+    await Logger.error("getActionById", "Error fetching action", {
+      error: error.message,
+      actionId: req.params.id,
+      tenant: req.user.tenant,
+      userId: req.user?._id
+    });
+
+    res.status(500).json({
+      success: false,
+      message: "Error fetching action",
+      error: error.message
+    });
   }
 };
 
@@ -297,6 +342,12 @@ exports.updateAction = async (req, res, next) => {
   try {
     const { error, value } = updateActionSchema.validate(req.body);
     if (error) {
+      await Logger.warn("updateAction", "Validation failed", {
+        tenant: req.user.tenant,
+        userId: req.user?._id,
+        details: error.details[0].message
+      });
+
       return res.status(400).json({
         success: false,
         message: error.details[0].message
@@ -309,32 +360,41 @@ exports.updateAction = async (req, res, next) => {
     });
 
     if (!action) {
+      await Logger.warn("updateAction", "Action not found", {
+        actionId: req.params.id,
+        tenant: req.user.tenant,
+        userId: req.user?._id
+      });
+
       return res.status(404).json({
         success: false,
         message: "Action not found"
       });
     }
 
-    // Check if user can update (admin, companyAdmin, or assigned member)
-    const canUpdate = req.user.role === "admin" ||
+    const canUpdate =
+      req.user.role === "admin" ||
       req.user.role === "companyAdmin" ||
       (action.assignedTo && action.assignedTo.toString() === req.user._id.toString());
 
     if (!canUpdate) {
+      await Logger.warn("updateAction", "Unauthorized update attempt", {
+        actionId: req.params.id,
+        tenant: req.user.tenant,
+        userId: req.user?._id
+      });
+
       return res.status(403).json({
         success: false,
         message: "Not authorized to update this action"
       });
     }
 
-    // Track status changes for notifications
     const oldStatus = action.status;
     const oldAssignee = action.assignedTo;
 
-    // Update action
     Object.assign(action, value);
 
-    // Set completion time if resolving
     if (value.status === "resolved" && oldStatus !== "resolved") {
       action.completedAt = new Date();
       action.completedBy = req.user._id;
@@ -349,7 +409,6 @@ exports.updateAction = async (req, res, next) => {
       { path: "completedBy", select: "name email" }
     ]);
 
-    // Send notifications for status changes
     if (oldStatus !== action.status) {
       if (action.assignedTo && action.assignedTo._id.toString() !== req.user._id.toString()) {
         await sendNotification({
@@ -361,7 +420,6 @@ exports.updateAction = async (req, res, next) => {
       }
     }
 
-    // Send notification for new assignment
     if (oldAssignee?.toString() !== action.assignedTo?.toString() && action.assignedTo) {
       await sendNotification({
         userId: action.assignedTo._id,
@@ -371,14 +429,31 @@ exports.updateAction = async (req, res, next) => {
       });
     }
 
-    res.json({
+    await Logger.info("updateAction", "Action updated successfully", {
+      actionId: req.params.id,
+      tenant: req.user.tenant,
+      userId: req.user?._id
+    });
+
+    res.status(200).json({
       success: true,
       message: "Action updated successfully",
       data: action
     });
 
   } catch (error) {
-    next(error);
+    await Logger.error("updateAction", "Error updating action", {
+      error: error.message,
+      actionId: req.params.id,
+      tenant: req.user.tenant,
+      userId: req.user?._id
+    });
+
+    res.status(500).json({
+      success: false,
+      message: "Error updating action",
+      error: error.message
+    });
   }
 };
 
@@ -393,19 +468,42 @@ exports.deleteAction = async (req, res, next) => {
     });
 
     if (!action) {
+      await Logger.warn("deleteAction", "Action not found for deletion", {
+        actionId: req.params.id,
+        tenant: req.user.tenant,
+        userId: req.user?._id
+      });
+
       return res.status(404).json({
         success: false,
         message: "Action not found"
       });
     }
 
-    res.json({
+    await Logger.info("deleteAction", "Action deleted successfully", {
+      actionId: req.params.id,
+      tenant: req.user.tenant,
+      userId: req.user?._id
+    });
+
+    res.status(200).json({
       success: true,
       message: "Action deleted successfully"
     });
 
   } catch (error) {
-    next(error);
+    await Logger.error("deleteAction", "Error deleting action", {
+      error: error.message,
+      actionId: req.params.id,
+      tenant: req.user.tenant,
+      userId: req.user?._id
+    });
+
+    res.status(500).json({
+      success: false,
+      message: "Error deleting action",
+      error: error.message
+    });
   }
 };
 
@@ -422,6 +520,12 @@ exports.assignAction = async (req, res, next) => {
     });
 
     if (!action) {
+      await Logger.warn("assignAction", "Action not found", {
+        actionId: req.params.id,
+        tenant: req.user.tenant,
+        userId: req.user?._id
+      });
+
       return res.status(404).json({
         success: false,
         message: "Action not found"
@@ -432,6 +536,13 @@ exports.assignAction = async (req, res, next) => {
     if (assignedTo) {
       const assignee = await User.findById(assignedTo);
       if (!assignee || assignee.tenant.toString() !== req.user.tenant.toString()) {
+        await Logger.warn("assignAction", "Invalid assignee provided", {
+          actionId: req.params.id,
+          tenant: req.user.tenant,
+          userId: req.user?._id,
+          assignedTo
+        });
+
         return res.status(404).json({
           success: false,
           message: "Assignee not found"
@@ -456,14 +567,32 @@ exports.assignAction = async (req, res, next) => {
       });
     }
 
-    res.json({
+    await Logger.info("assignAction", "Action assigned successfully", {
+      actionId: req.params.id,
+      tenant: req.user.tenant,
+      userId: req.user?._id,
+      assignedTo
+    });
+
+    res.status(200).json({
       success: true,
       message: "Action assigned successfully",
       data: action
     });
 
   } catch (error) {
-    next(error);
+    await Logger.error("assignAction", "Error assigning action", {
+      error: error.message,
+      actionId: req.params.id,
+      tenant: req.user.tenant,
+      userId: req.user?._id
+    });
+
+    res.status(500).json({
+      success: false,
+      message: "Error assigning action",
+      error: error.message
+    });
   }
 };
 
@@ -475,6 +604,12 @@ exports.getActionsByPriority = async (req, res, next) => {
     const { priority } = req.params;
 
     if (!["high", "medium", "long-term"].includes(priority)) {
+      await Logger.warn("getActionsByPriority", "Invalid priority level", {
+        tenant: req.user.tenant,
+        userId: req.user?._id,
+        priority
+      });
+
       return res.status(400).json({
         success: false,
         message: "Invalid priority level"
@@ -491,13 +626,30 @@ exports.getActionsByPriority = async (req, res, next) => {
       ])
       .sort({ createdAt: -1 });
 
-    res.json({
+    await Logger.info("getActionsByPriority", "Fetched actions by priority successfully", {
+      tenant: req.user.tenant,
+      userId: req.user?._id,
+      priority,
+      total: actions.length
+    });
+
+    res.status(200).json({
       success: true,
       data: actions
     });
 
   } catch (error) {
-    next(error);
+    await Logger.error("getActionsByPriority", "Error fetching actions by priority", {
+      error: error.message,
+      tenant: req.user.tenant,
+      userId: req.user?._id
+    });
+
+    res.status(500).json({
+      success: false,
+      message: "Error fetching actions",
+      error: error.message
+    });
   }
 };
 
@@ -509,6 +661,12 @@ exports.getActionsByStatus = async (req, res, next) => {
     const { status } = req.params;
 
     if (!["open", "in-progress", "resolved"].includes(status)) {
+      await Logger.warn("getActionsByStatus", "Invalid status value", {
+        tenant: req.user.tenant,
+        userId: req.user?._id,
+        status
+      });
+
       return res.status(400).json({
         success: false,
         message: "Invalid status"
@@ -525,13 +683,30 @@ exports.getActionsByStatus = async (req, res, next) => {
       ])
       .sort({ createdAt: -1 });
 
-    res.json({
+    await Logger.info("getActionsByStatus", "Fetched actions by status successfully", {
+      tenant: req.user.tenant,
+      userId: req.user?._id,
+      status,
+      total: actions.length
+    });
+
+    res.status(200).json({
       success: true,
       data: actions
     });
 
   } catch (error) {
-    next(error);
+    await Logger.error("getActionsByStatus", "Error fetching actions by status", {
+      error: error.message,
+      tenant: req.user.tenant,
+      userId: req.user?._id
+    });
+
+    res.status(500).json({
+      success: false,
+      message: "Error fetching actions",
+      error: error.message
+    });
   }
 };
 
@@ -543,6 +718,12 @@ exports.getActionsAnalytics = async (req, res, next) => {
     const { period = "30" } = req.query;
     const daysAgo = new Date();
     daysAgo.setDate(daysAgo.getDate() - parseInt(period));
+
+    await Logger.info("getActionsAnalytics", "Fetching actions analytics", {
+      tenant: req.user.tenant,
+      userId: req.user?._id,
+      period
+    });
 
     const analytics = await Action.aggregate([
       {
@@ -585,10 +766,7 @@ exports.getActionsAnalytics = async (req, res, next) => {
             {
               $group: {
                 _id: {
-                  $dateToString: {
-                    format: "%Y-%m-%d",
-                    date: "$createdAt"
-                  }
+                  $dateToString: { format: "%Y-%m-%d", date: "$createdAt" }
                 },
                 created: { $sum: 1 },
                 resolved: { $sum: { $cond: [{ $eq: ["$status", "resolved"] }, 1, 0] } }
@@ -614,9 +792,7 @@ exports.getActionsAnalytics = async (req, res, next) => {
             },
             {
               $project: {
-                resolutionTime: {
-                  $subtract: ["$completedAt", "$createdAt"]
-                }
+                resolutionTime: { $subtract: ["$completedAt", "$createdAt"] }
               }
             },
             {
@@ -632,7 +808,18 @@ exports.getActionsAnalytics = async (req, res, next) => {
 
     const result = analytics[0];
 
-    res.json({
+    await Logger.info("getActionsAnalytics", "Fetched analytics successfully", {
+      tenant: req.user.tenant,
+      userId: req.user?._id,
+      period,
+      stats: {
+        byPriority: result.byPriority?.length || 0,
+        byStatus: result.byStatus?.length || 0,
+        byTeam: result.byTeam?.length || 0
+      }
+    });
+
+    res.status(200).json({
       success: true,
       data: {
         byPriority: result.byPriority,
@@ -646,7 +833,17 @@ exports.getActionsAnalytics = async (req, res, next) => {
     });
 
   } catch (error) {
-    next(error);
+    await Logger.error("getActionsAnalytics", "Error fetching actions analytics", {
+      tenant: req.user.tenant,
+      userId: req.user?._id,
+      error: error.message
+    });
+
+    res.status(500).json({
+      success: false,
+      message: "Error fetching analytics",
+      error: error.message
+    });
   }
 };
 
@@ -657,6 +854,12 @@ exports.bulkUpdateActions = async (req, res, next) => {
   try {
     const { error, value } = bulkUpdateSchema.validate(req.body);
     if (error) {
+      await Logger.warn("bulkUpdateActions", "Validation failed for bulk update", {
+        tenant: req.user.tenant,
+        userId: req.user?._id,
+        validationError: error.details[0].message
+      });
+
       return res.status(400).json({
         success: false,
         message: error.details[0].message
@@ -665,6 +868,13 @@ exports.bulkUpdateActions = async (req, res, next) => {
 
     const { actionIds, updates } = value;
 
+    await Logger.info("bulkUpdateActions", "Starting bulk update for actions", {
+      tenant: req.user.tenant,
+      userId: req.user?._id,
+      actionCount: actionIds.length,
+      updates
+    });
+
     // Validate all actions exist and belong to tenant
     const actions = await Action.find({
       _id: { $in: actionIds },
@@ -672,6 +882,13 @@ exports.bulkUpdateActions = async (req, res, next) => {
     });
 
     if (actions.length !== actionIds.length) {
+      await Logger.warn("bulkUpdateActions", "Some actions not found for tenant", {
+        tenant: req.user.tenant,
+        userId: req.user?._id,
+        found: actions.length,
+        expected: actionIds.length
+      });
+
       return res.status(404).json({
         success: false,
         message: "Some actions not found"
@@ -687,188 +904,69 @@ exports.bulkUpdateActions = async (req, res, next) => {
       { $set: updates }
     );
 
-    res.json({
+    await Logger.info("bulkUpdateActions", "Bulk update completed successfully", {
+      tenant: req.user.tenant,
+      userId: req.user?._id,
+      modifiedCount: result.modifiedCount
+    });
+
+    res.status(200).json({
       success: true,
       message: `${result.modifiedCount} actions updated successfully`,
       data: { modifiedCount: result.modifiedCount }
     });
 
   } catch (error) {
-    next(error);
+    await Logger.error("bulkUpdateActions", "Error performing bulk update", {
+      tenant: req.user.tenant,
+      userId: req.user?._id,
+      error: error.message
+    });
+
+    res.status(500).json({
+      success: false,
+      message: "Error updating actions",
+      error: error.message
+    });
   }
 };
 
 // @desc    Generate actions from feedback using AI
-// @route   POST /api/actions/generate/feedback
-// @access  Private (companyAdmin, admin)
-// exports.generateActionsFromFeedback = async (req, res, next) => {
-//   try {
-//     const { feedbackIds, options = {} } = req.body;
-
-//     if (!feedbackIds || !Array.isArray(feedbackIds) || feedbackIds.length === 0) {
-//       return res.status(400).json({
-//         success: false,
-//         message: "Feedback IDs array required"
-//       });
-//     }
-
-//     // Get feedback data
-//     const feedbacks = await FeedbackAnalysis.find({
-//       _id: { $in: feedbackIds },
-//       tenant: req.user.tenant
-//     }).populate("survey", "title");
-
-//     if (feedbacks.length === 0) {
-//       return res.status(404).json({
-//         success: false,
-//         message: "No feedback found"
-//       });
-//     }
-
-//     // Prepare AI prompt
-//     const feedbackSummary = feedbacks.map(f => ({
-//       id: f._id,
-//       sentiment: f.sentiment,
-//       category: f.category,
-//       summary: f.summary,
-//       survey: f.survey?.title
-//     }));
-
-//     const prompt = `
-// Based on the following feedback analysis, generate actionable items to address the issues and improve customer satisfaction:
-
-// ${JSON.stringify(feedbackSummary, null, 2)}
-
-// For each action item, provide:
-// 1. A clear, concise description (max 100 words)
-// 2. Priority level (high/medium/long-term)
-// 3. Suggested team or department
-// 4. Category for the action
-
-// Focus on:
-// - Immediate fixes for high-impact negative feedback
-// - Process improvements for recurring issues
-// - Long-term strategic improvements
-
-// Return a JSON array of action objects with fields: description, priority, team, category
-// `;
-
-//     try {
-//       const aiResponse = await aiClient.complete({
-//         prompt,
-//         maxTokens: 1000
-//       });
-
-//       let suggestedActions;
-//       try {
-//         suggestedActions = JSON.parse(aiResponse.text);
-//       } catch {
-//         // Fallback parsing if AI returns non-JSON
-//         suggestedActions = [
-//           {
-//             description: "Review and improve customer service processes based on feedback",
-//             priority: "medium",
-//             team: "Customer Service",
-//             category: "Process Improvement"
-//           }
-//         ];
-//       }
-
-//       // Create actions in database
-//       const createdActions = [];
-//       for (const actionData of suggestedActions) {
-//         try {
-//           const action = await Action.create({
-//             feedback: feedbacks[0]._id, // Link to first feedback for reference
-//             description: actionData.description,
-//             priority: actionData.priority || "medium",
-//             team: actionData.team || "General",
-//             category: actionData.category || "AI Generated",
-//             tenant: req.user.tenant,
-//             createdBy: req.user._id,
-//             tags: ["ai-generated", "feedback-analysis"]
-//           });
-
-//           createdActions.push(action);
-//         } catch (err) {
-//           console.error("Error creating action:", err);
-//         }
-//       }
-
-//       if (createdActions.length > 0) {
-//         const actionIds = createdActions.map(a => a._id);
-//         await followUp({ actionIds, messageTemplate: 'Your feedback received, we are on it!' });
-//       }
-
-//       res.json({
-//         success: true,
-//         message: `${createdActions.length} actions generated successfully`,
-//         data: {
-//           actions: createdActions,
-//           feedbackProcessed: feedbacks.length
-//         }
-//       });
-
-//     } catch (aiError) {
-//       console.error("AI generation error:", aiError);
-
-//       // Fallback: create basic actions
-//       const fallbackActions = await Promise.all(
-//         feedbacks.filter(f => f.sentiment === "negative").map(f =>
-//           Action.create({
-//             feedback: f._id,
-//             description: `Address feedback concerns: ${f.summary?.substring(0, 100) || 'Review customer feedback'}`,
-//             priority: "high",
-//             team: "Customer Service",
-//             category: "Customer Issue",
-//             tenant: req.user.tenant,
-//             createdBy: req.user._id,
-//             tags: ["auto-generated", "negative-feedback"]
-//           })
-//         )
-//       );
-//       if (fallbackActions.length > 0) {
-//         const actionIds = fallbackActions.map(a => a._id);
-//         await followUp({ actionIds, messageTemplate: 'Your feedback received, we are on it!' });
-//       }
-
-//       res.json({
-//         success: true,
-//         message: `${fallbackActions.length} basic actions generated (AI unavailable)`,
-//         data: {
-//           actions: fallbackActions,
-//           feedbackProcessed: feedbacks.length,
-//           fallback: true
-//         }
-//       });
-//     }
-
-//   } catch (error) {
-//     next(error);
-//   }
-// };
+// @route   POST /api/actions/generate-from-feedback
+// @access  Private
 exports.generateActionsFromFeedback = async (req, res, next) => {
-  console.log("🤖 Entering generateActionsFromFeedback...");
-  console.log("🤖 Request Body:", req.body);
-
   try {
     const { feedbackIds, options = {} } = req.body;
-    console.log("🔍 Feedback IDs:", feedbackIds);
 
     if (!feedbackIds || !Array.isArray(feedbackIds) || feedbackIds.length === 0) {
-      console.error("❌ Invalid feedbackIds");
-      return res.status(400).json({ success: false, message: "Feedback IDs array required" });
+      await Logger.warn("generateActionsFromFeedback", "Invalid feedbackIds received", {
+        tenant: req.user.tenant,
+        userId: req.user?._id,
+        body: req.body
+      });
+
+      return res.status(400).json({
+        success: false,
+        message: "Feedback IDs array required"
+      });
     }
 
     const feedbacks = await FeedbackAnalysis.find({
       _id: { $in: feedbackIds },
       tenant: req.user.tenant
     }).populate("survey", "title");
-    console.log("📊 Found feedbacks:", feedbacks.length);
 
     if (feedbacks.length === 0) {
-      console.log("❌ No feedback found");
-      return res.status(404).json({ success: false, message: "No feedback found" });
+      await Logger.warn("generateActionsFromFeedback", "No feedback found for provided IDs", {
+        tenant: req.user.tenant,
+        userId: req.user?._id,
+        feedbackIds
+      });
+
+      return res.status(404).json({
+        success: false,
+        message: "No feedback found"
+      });
     }
 
     const feedbackSummary = feedbacks.map(f => ({
@@ -878,27 +976,26 @@ exports.generateActionsFromFeedback = async (req, res, next) => {
       summary: f.summary,
       survey: f.survey?.title
     }));
-    console.log("📝 Feedback Summary:", feedbackSummary);
 
     const prompt = `Based on the following... Return JSON array...`;
-    console.log("🤖 Sending AI prompt...");
 
     try {
       const aiResponse = await aiClient.complete({ prompt, maxTokens: 1000 });
-      console.log("✅ AI Response:", aiResponse.text?.substring(0, 100) + "...");
 
       let suggestedActions;
       try {
         suggestedActions = JSON.parse(aiResponse.text);
-        console.log("✅ Parsed Actions:", suggestedActions.length);
       } catch {
-        suggestedActions = [{ description: "Review customer service...", priority: "medium", team: "Customer Service", category: "Process Improvement" }];
-        console.log("⚠️ Fallback parsing used");
+        suggestedActions = [{
+          description: "Review customer service...",
+          priority: "medium",
+          team: "Customer Service",
+          category: "Process Improvement"
+        }];
       }
 
       const createdActions = [];
       for (const actionData of suggestedActions) {
-        console.log("📝 Creating action for:", actionData.description);
         const action = await Action.create({
           feedback: feedbacks[0]._id,
           description: actionData.description,
@@ -910,50 +1007,89 @@ exports.generateActionsFromFeedback = async (req, res, next) => {
           tags: ["ai-generated", "feedback-analysis"]
         });
         createdActions.push(action);
-        console.log("✅ Action Created ID:", action._id);
       }
 
       if (createdActions.length > 0) {
         const actionIds = createdActions.map(a => a._id);
-        console.log("📤 Calling followUp with IDs:", actionIds);
-        await followUp({ actionIds, messageTemplate: 'Your feedback received, we are on it!' });
-        console.log("✅ Follow-up complete!");
+        await followUp({
+          actionIds,
+          messageTemplate: "Your feedback received, we are on it!"
+        });
       }
 
-      res.json({ success: true, message: `${createdActions.length} actions generated`, data: { actions: createdActions, feedbackProcessed: feedbacks.length } });
-      console.log("✅ Exiting with success!");
+      await Logger.info("generateActionsFromFeedback", "Actions generated successfully from feedback", {
+        tenant: req.user.tenant,
+        userId: req.user?._id,
+        createdCount: createdActions.length,
+        feedbackCount: feedbacks.length
+      });
+
+      res.status(200).json({
+        success: true,
+        message: `${createdActions.length} actions generated`,
+        data: {
+          actions: createdActions,
+          feedbackProcessed: feedbacks.length
+        }
+      });
+
     } catch (aiError) {
-      console.error("💥 AI Error:", aiError.message);
+      await Logger.error("generateActionsFromFeedback", "AI service failed, using fallback logic", {
+        tenant: req.user.tenant,
+        userId: req.user?._id,
+        error: aiError.message
+      });
 
       const fallbackActions = await Promise.all(
-        feedbacks.filter(f => f.sentiment === "negative").map(f => {
-          console.log("⚠️ Fallback action for feedback:", f._id);
-          return Action.create({
+        feedbacks
+          .filter(f => f.sentiment === "negative")
+          .map(f => Action.create({
             feedback: f._id,
-            description: `Address concerns: ${f.summary?.substring(0, 100) || 'Review feedback'}`,
+            description: `Address concerns: ${f.summary?.substring(0, 100) || "Review feedback"}`,
             priority: "high",
             team: "Customer Service",
             category: "Customer Issue",
             tenant: req.user.tenant,
             createdBy: req.user._id,
             tags: ["auto-generated", "negative-feedback"]
-          });
-        })
+          }))
       );
-      console.log("⚠️ Fallback Actions Created:", fallbackActions.length);
 
       if (fallbackActions.length > 0) {
         const actionIds = fallbackActions.map(a => a._id);
-        console.log("📤 Calling followUp (fallback):", actionIds);
-        await followUp({ actionIds, messageTemplate: 'Your feedback received, we are on it!' });
-        console.log("✅ Fallback follow-up complete!");
+        await followUp({
+          actionIds,
+          messageTemplate: "Your feedback received, we are on it!"
+        });
       }
 
-      res.json({ success: true, message: `${fallbackActions.length} basic actions generated (AI unavailable)`, data: { actions: fallbackActions, feedbackProcessed: feedbacks.length, fallback: true } });
-      console.log("✅ Exiting with fallback success!");
+      await Logger.info("generateActionsFromFeedback", "Fallback actions generated due to AI error", {
+        tenant: req.user.tenant,
+        userId: req.user?._id,
+        fallbackCount: fallbackActions.length
+      });
+
+      res.status(200).json({
+        success: true,
+        message: `${fallbackActions.length} basic actions generated (AI unavailable)`,
+        data: {
+          actions: fallbackActions,
+          feedbackProcessed: feedbacks.length,
+          fallback: true
+        }
+      });
     }
   } catch (error) {
-    console.error("💥 Error in generateActionsFromFeedback:", error.message);
-    next(error);
+    await Logger.error("generateActionsFromFeedback", "Unexpected error generating actions", {
+      tenant: req.user.tenant,
+      userId: req.user?._id,
+      error: error.message
+    });
+
+    res.status(500).json({
+      success: false,
+      message: "Error generating actions from feedback",
+      error: error.message
+    });
   }
 };

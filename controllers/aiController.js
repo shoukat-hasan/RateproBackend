@@ -5,6 +5,7 @@ const { nanoid } = require("nanoid");
 const aiClient = require("../utils/aiClient"); // implement wrapper for chosen LLM (OpenAI recommended)
 const Joi = require("joi");
 const { default: mongoose } = require("mongoose");
+const Logger = require("../utils/auditLog");
 
 // Simple validation schemas
 const draftSchema = Joi.object({
@@ -68,12 +69,37 @@ const industryRulesSchema = new mongoose.Schema({
   surveyLength: { min: Number, max: Number },
 });
 
+const suggestSchema = Joi.object({
+  surveyId: Joi.string().hex().length(24).optional(),
+  context: Joi.string().required(),
+  questionCount: Joi.number().integer().min(1).max(5).default(1),
+});
+
+const optimizeSchema = Joi.object({
+  surveyId: Joi.string().hex().length(24).required(),
+});
+
+const translateSchema = Joi.object({
+  text: Joi.string().required(),
+  from: Joi.string().valid("en", "ar").default("en"),
+  to: Joi.string().valid("en", "ar").required(),
+});
+
+// @desc    Generate AI Draft Survey
+// @route   POST /api/ai/draft-survey
+// @access  Private
 exports.aiDraftSurvey = async (req, res, next) => {
-  console.log("📤 Sending AI Draft Request...");
   try {
     const { error, value } = draftSchema.validate(req.body);
-    console.log(req.body)
-    if (error) return res.status(400).json({ message: error.details[0].message });
+
+    if (error) {
+      await Logger.warn("aiDraftSurvey", "Validation failed for AI draft request", {
+        userId: req.user?._id,
+        tenant: req.user.tenant,
+        message: error.details[0].message
+      });
+      return res.status(400).json({ message: error.details[0].message });
+    }
 
     const {
       goal,
@@ -89,18 +115,19 @@ exports.aiDraftSurvey = async (req, res, next) => {
       includeLogic
     } = value;
 
-    // Optional: ensure tenant belongs to user (if provided)
     const tenant = tenantId ? await Tenant.findById(tenantId) : req.user.tenant;
-    if (!tenant) return res.status(403).json({ message: "Tenant required or not found" });
+    if (!tenant) {
+      await Logger.warn("aiDraftSurvey", "Tenant not found or missing", {
+        userId: req.user?._id,
+        tenantId
+      });
+      return res.status(403).json({ message: "Tenant required or not found" });
+    }
 
-    // Get survey length rules based on type
     const lengthRule = surveyLengthRules[surveyType] || surveyLengthRules["customer-feedback"];
     const adjustedQuestionCount = Math.min(Math.max(questionCount, lengthRule.min), lengthRule.max);
-
-    // Get industry templates if available and requested
     const industryTemplate = useTemplates && industryTemplates[industry?.toLowerCase()];
 
-    // Build enhanced AI prompt
     const prompt = [
       `You are an expert survey designer specializing in creating engaging, effective surveys.`,
       `Create a ${surveyType || "customer feedback"} survey with ${adjustedQuestionCount} questions for: "${goal}".`,
@@ -108,56 +135,27 @@ exports.aiDraftSurvey = async (req, res, next) => {
       targetAudience ? `Target audience: ${targetAudience}.` : "",
       products && products.length ? `Products/Services: ${products.join(", ")}.` : "",
       tenant.companyName ? `Company: ${tenant.companyName}.` : "",
-
-      // Question type requirements
       `Question types to include:`,
       `- 1 NPS question (0-10 scale): "How likely are you to recommend..."`,
       `- 2-3 Rating questions (1-5 stars): Service quality, satisfaction, etc.`,
       `- 1-2 Multiple choice: Preferences, categories, demographics`,
       `- 1 Open text: "What can we improve?" or "Additional comments"`,
-
-      // Industry-specific guidance
       industryTemplate ? `Use these industry-proven questions as inspiration: ${JSON.stringify(industryTemplate.commonQuestions)}` : "",
-
-      // Logic and flow
-      includeLogic ? `Add conditional logic: If NPS ≤ 6, show follow-up "What can we improve?" If rating ≤ 2, show "How can we fix this?"` : "",
-
-      // Formatting requirements
-      `Return valid JSON only with structure:`,
-      `{`,
-      `  "title": "Survey Title",`,
-      `  "description": "Brief intro (2-3 sentences)",`,
-      `  "estimatedTime": "${lengthRule.avgTime}",`,
-      `  "questions": [`,
-      `    {`,
-      `      "id": "unique_id",`,
-      `      "type": "nps|rating|mcq|text|yesno",`,
-      `      "questionText": "Question here",`,
-      `      "options": ["opt1", "opt2"] (for mcq only),`,
-      `      "required": true/false,`,
-      `      "scale": "1-5" (for rating),`,
-      `      "logic": {"condition": "value <= 6", "showQuestion": "followup_id"} (optional)`,
-      `    }`,
-      `  ]`,
-      `}`,
-
-      `Language: ${language === "both" ? "Provide Arabic translation in separate field" : language}.`,
-      `Tone: ${tone} (adjust formality accordingly).`,
+      includeLogic ? `Add conditional logic: If NPS ≤ 6, show follow-up "What can we improve?"` : "",
+      `Return valid JSON only with structure: {...}`,
+      `Language: ${language === "both" ? "Provide Arabic translation too" : language}.`,
+      `Tone: ${tone}.`,
       `Survey length: ${lengthRule.avgTime} completion time.`
     ].join(" ");
 
-    // Call LLM via aiClient (wrap your OpenAI or other provider)
     const aiResponse = await aiClient.complete({ prompt, maxTokens: 800 });
 
-    // Expect aiResponse.text to contain JSON. Try parse; fallback to safe default template
     let suggestion;
     try {
       suggestion = JSON.parse(aiResponse.text);
-    } catch (e) {
-      // Enhanced fallback based on survey type and industry
+    } catch {
       const fallbackQuestions = [];
 
-      // Always include NPS
       fallbackQuestions.push({
         id: nanoid(),
         type: "nps",
@@ -166,7 +164,6 @@ exports.aiDraftSurvey = async (req, res, next) => {
         required: true
       });
 
-      // Add rating question
       fallbackQuestions.push({
         id: nanoid(),
         type: "rating",
@@ -175,7 +172,6 @@ exports.aiDraftSurvey = async (req, res, next) => {
         required: true
       });
 
-      // Industry-specific question
       if (industry) {
         const industryQ = industryTemplate?.commonQuestions?.[0];
         if (industryQ) {
@@ -190,7 +186,6 @@ exports.aiDraftSurvey = async (req, res, next) => {
         }
       }
 
-      // Multiple choice based on target audience
       if (targetAudience === "customers") {
         fallbackQuestions.push({
           id: nanoid(),
@@ -209,7 +204,6 @@ exports.aiDraftSurvey = async (req, res, next) => {
         });
       }
 
-      // Always end with open text
       const improvementId = nanoid();
       fallbackQuestions.push({
         id: improvementId,
@@ -218,7 +212,6 @@ exports.aiDraftSurvey = async (req, res, next) => {
         required: false
       });
 
-      // Add logic if requested
       if (includeLogic && fallbackQuestions.length >= 2) {
         fallbackQuestions[0].logic = {
           condition: "value <= 6",
@@ -239,10 +232,22 @@ exports.aiDraftSurvey = async (req, res, next) => {
       };
     }
 
-    // Return draft (not saved) so frontend can show preview/allow edit
+    await Logger.info("aiDraftSurvey", "AI survey draft generated successfully", {
+      userId: req.user?._id,
+      tenant: req.user.tenant,
+      type: surveyType,
+      language,
+      questionCount: adjustedQuestionCount
+    });
+
     res.status(200).json({ draft: suggestion });
   } catch (err) {
-    console.error("Gemini failed:", err.message);
+    await Logger.error("aiDraftSurvey", "AI draft generation failed", {
+      userId: req.user?._id,
+      tenant: req.user.tenant,
+      error: err.message
+    });
+
     return res.status(200).json({
       message: "AI temporarily unavailable, showing default draft",
       draft: [
@@ -256,89 +261,188 @@ exports.aiDraftSurvey = async (req, res, next) => {
   }
 };
 
-const suggestSchema = Joi.object({
-  surveyId: Joi.string().hex().length(24).optional(),
-  context: Joi.string().required(),
-  questionCount: Joi.number().integer().min(1).max(5).default(1),
-});
-
+// @desc    Suggest survey questions based on context
+// @route   POST /api/ai/suggest-questions
+// @access  Private
 exports.aiSuggestQuestion = async (req, res, next) => {
   try {
     const { error, value } = suggestSchema.validate(req.body);
-    if (error) return res.status(400).json({ message: error.details[0].message });
+    if (error) {
+      return res.status(400).json({
+        success: false,
+        message: error.details[0].message
+      });
+    }
 
     const { surveyId, context, questionCount } = value;
 
-    // If surveyId provided, load survey to give context
-    let survey = null;
-    if (surveyId) survey = await Survey.findById(surveyId).select("title questions translations");
+    // Tenant validation
+    const tenant = req.user?.tenant;
+    if (!tenant) {
+      return res.status(403).json({
+        success: false,
+        message: "Tenant not found or unauthorized"
+      });
+    }
 
+    // Load survey (if provided) scoped to tenant
+    let survey = null;
+    if (surveyId) {
+      survey = await Survey.findOne({ _id: surveyId, tenant }).select("title questions translations");
+      if (!survey) {
+        return res.status(404).json({
+          success: false,
+          message: "Survey not found for this tenant"
+        });
+      }
+    }
+
+    // Build AI prompt
     const prompt = [
-      `You are a helpful assistant that suggests survey questions.`,
+      `You are an expert survey question generator.`,
       `Context: ${context}`,
       survey ? `Survey title: ${survey.title}. Existing questions: ${JSON.stringify(survey.questions)}` : "",
-      `Generate ${questionCount} candidate questions, with suggested type (rating, nps, likert, mcq, text) and short options if mcq. Return JSON array.`
+      `Generate ${questionCount} new candidate questions.`,
+      `Include suggested type (rating, nps, likert, mcq, text) and short options if mcq.`,
+      `Return only valid JSON array of objects with fields: id, type, questionText, options (if any), required (bool).`
     ].join(" ");
 
+    // Send request to AI model
     const aiResponse = await aiClient.complete({ prompt, maxTokens: 400 });
 
     let suggestions;
     try {
       suggestions = JSON.parse(aiResponse.text);
-    } catch (e) {
-      // fallback simple suggestion
-      suggestions = [{ id: nanoid(), type: "text", questionText: context, required: false }];
+    } catch {
+      suggestions = [
+        { id: nanoid(), type: "text", questionText: context || "What’s your feedback?", required: false }
+      ];
     }
 
-    res.status(200).json({ suggestions });
-  } catch (err) {
-    next(err);
+    // Log success if AI generation worked
+    await Logger.info("aiSuggestQuestion", "AI suggested survey questions", {
+      tenantId: tenant,
+      userId: req.user?._id,
+      suggestionCount: suggestions.length
+    });
+
+    // Respond with success
+    return res.status(200).json({
+      success: true,
+      message: `${suggestions.length} AI-generated question${suggestions.length > 1 ? "s" : ""} found`,
+      data: suggestions
+    });
+
+  } catch (error) {
+    // Log error only on failure
+    await Logger.error("aiSuggestQuestion", "Error suggesting questions", {
+      message: error.message,
+      stack: error.stack,
+      userId: req.user?._id,
+      tenantId: req.user?.tenant
+    });
+
+    return res.status(500).json({
+      success: false,
+      message: "Error generating AI-based questions",
+      error: error.message
+    });
   }
 };
 
-const optimizeSchema = Joi.object({
-  surveyId: Joi.string().hex().length(24).required(),
-});
-
+// @desc    Optimize survey questions for clarity and engagement
+// @route   POST /api/ai/optimize-survey
+// @access  Private
 exports.aiOptimizeSurvey = async (req, res, next) => {
   try {
     const { error, value } = optimizeSchema.validate(req.body);
-    if (error) return res.status(400).json({ message: error.details[0].message });
+    if (error) {
+      return res.status(400).json({
+        success: false,
+        message: error.details[0].message
+      });
+    }
 
     const { surveyId } = value;
-    const survey = await Survey.findById(surveyId);
-    if (!survey) return res.status(404).json({ message: "Survey not found" });
+    const tenant = req.user?.tenant;
 
-    // Prepare prompt: include questions, goal from title/description
-    const rule = await IndustryRules.findOne({ industry: survey.category }) || { min: 5, max: 10 };
-    const prompt = `Optimize this survey for response rate and clarity. 
-      Limit questions between ${rule.min} and ${rule.max}. 
-      Title: ${survey.title}. Description: ${survey.description}. 
-      Questions: ${JSON.stringify(survey.questions)}. 
-      Output JSON with suggestions: replaceQuestionIds[], rename suggestions, 
-      and recommended question types/length.`;
+    if (!tenant) {
+      return res.status(403).json({
+        success: false,
+        message: "Tenant not found or unauthorized"
+      });
+    }
 
+    const survey = await Survey.findOne({ _id: surveyId, tenant });
+    if (!survey) {
+      return res.status(404).json({
+        success: false,
+        message: "Survey not found for this tenant"
+      });
+    }
+
+    // Prepare prompt
+    const rule = (await IndustryRules.findOne({ industry: survey.category })) || { min: 5, max: 10 };
+    const prompt = `
+      Optimize this survey for response rate and clarity.
+      Limit questions between ${rule.min} and ${rule.max}.
+      Title: ${survey.title}.
+      Description: ${survey.description}.
+      Questions: ${JSON.stringify(survey.questions)}.
+      Output JSON with fields:
+      {
+        "replaceQuestionIds": [],
+        "renameSuggestions": [],
+        "recommendedTypes": [],
+        "notes": "..."
+      }
+    `;
+
+    // Send AI request
     const aiResponse = await aiClient.complete({ prompt, maxTokens: 600 });
 
     let optimized;
     try {
       optimized = JSON.parse(aiResponse.text);
     } catch (e) {
-      optimized = { message: "AI optimization failed to parse. No changes." };
+      optimized = { message: "AI optimization failed to parse. No changes applied." };
     }
 
-    res.status(200).json({ optimized });
-  } catch (err) {
-    next(err);
+    // ✅ Log success event
+    await Logger.info("aiOptimizeSurvey", "AI optimized survey successfully", {
+      tenantId: tenant,
+      userId: req.user?._id,
+      surveyId,
+      optimizedKeys: Object.keys(optimized)
+    });
+
+    // ✅ Respond success
+    return res.status(200).json({
+      success: true,
+      message: "Survey optimized successfully",
+      data: optimized
+    });
+
+  } catch (error) {
+    // ❌ Log failure event
+    await Logger.error("aiOptimizeSurvey", "Error optimizing survey", {
+      message: error.message,
+      stack: error.stack,
+      tenantId: req.user?.tenant,
+      userId: req.user?._id
+    });
+
+    return res.status(500).json({
+      success: false,
+      message: "Error optimizing survey",
+      error: error.message
+    });
   }
 };
 
-const translateSchema = Joi.object({
-  text: Joi.string().required(),
-  from: Joi.string().valid("en", "ar").default("en"),
-  to: Joi.string().valid("en", "ar").required(),
-});
-
+// @desc    Translate survey text
+// @route   POST /api/ai/translate-survey
+// @access  Private
 exports.aiTranslateSurvey = async (req, res, next) => {
   try {
     const { error, value } = translateSchema.validate(req.body);
@@ -494,41 +598,20 @@ Make questions industry-specific and relevant to the survey goal.
 For hospitality: Include questions about rooms, food, service, staff, facilities.
 Use ${tone} tone and make questions easy to understand for ${targetAudience}.`;
 
-    console.log('🚀 AI Prompt Length:', promptText.length);
-    console.log('🚀 AI Prompt Preview:', promptText.substring(0, 300) + '...');
-
     // ✅ FIXED: Validate prompt before sending
     if (!promptText || promptText.trim().length === 0) {
-      console.error("❌ Generated prompt is empty!");
       throw new Error("Failed to generate AI prompt");
     }
-
-    // ✅ FIXED: Pass string directly to aiClient, not object
-    // ✅ DEBUGGING: Log the exact prompt being sent
-    console.log('🔍 About to call aiClient.complete with:');
-    console.log('🔍 Prompt type:', typeof promptText);
-    console.log('🔍 Prompt length:', promptText ? promptText.length : 'undefined');
-    console.log('🔍 Prompt is string:', typeof promptText === 'string');
-    console.log('🔍 Prompt is empty:', !promptText || promptText.trim().length === 0);
-    console.log('🔍 Prompt first 100 chars:', promptText ? promptText.substring(0, 100) : 'NO PROMPT');
 
     // ✅ ADDITIONAL SAFETY: Ensure prompt is clean string
     const cleanPrompt = String(promptText || '').trim();
     if (!cleanPrompt || cleanPrompt.length === 0) {
-      console.error("❌ Generated prompt is empty or invalid!");
-      console.error("❌ Original promptText:", promptText);
       throw new Error("Failed to generate valid AI prompt");
     }
-
-    console.log('✅ Clean prompt length:', cleanPrompt.length);
-    console.log('✅ Sending to aiClient...');
 
     // ✅ FIXED: Use clean prompt
     const result = await aiClient.complete(cleanPrompt);
     const responseText = result.text || result;
-
-    console.log('🤖 AI Raw Response Length:', responseText.length);
-    console.log('🤖 AI Raw Response Preview:', responseText.substring(0, 300) + '...');
 
     try {
       // Try to parse JSON response
@@ -544,7 +627,7 @@ Use ${tone} tone and make questions easy to understand for ${targetAudience}.`;
         return res.json(parsedResponse);
       }
     } catch (parseError) {
-      console.log('⚠️ JSON Parse failed, using enhanced fallback...', parseError.message);
+      error = parseError;
     }
 
     // ✅ ENHANCED: Industry-specific fallback with actual data
@@ -592,13 +675,11 @@ Use ${tone} tone and make questions easy to understand for ${targetAudience}.`;
         questions: fallbackQuestions.slice(0, questionCount)
       }
     };
-
-    console.log('✅ Using enhanced fallback response for', industry, 'with', fallbackQuestions.slice(0, questionCount).length, 'questions');
     res.json(fallbackResponse);
 
   } catch (error) {
     console.error('❌ AI Generation Error:', error);
-    
+
     // Return a safe fallback response instead of 500 error
     const fallbackResponse = {
       success: true,
@@ -636,7 +717,6 @@ Use ${tone} tone and make questions easy to understand for ${targetAudience}.`;
       }
     };
 
-    console.log('🔄 Using safe fallback due to AI error');
     res.json(fallbackResponse);
   }
 };
@@ -647,6 +727,14 @@ Use ${tone} tone and make questions easy to understand for ${targetAudience}.`;
 exports.aiSuggestLogic = async (req, res, next) => {
   try {
     const { questions, surveyGoal } = req.body;
+    const tenant = req.user?.tenant;
+
+    if (!tenant) {
+      return res.status(403).json({
+        success: false,
+        message: "Tenant not found or unauthorized"
+      });
+    }
 
     const prompt = `
 For this survey with goal "${surveyGoal}", suggest conditional logic rules:
@@ -682,9 +770,34 @@ Return JSON with logic suggestions.
       };
     }
 
-    res.json({ success: true, data: logicSuggestions });
+    // ✅ Log success only on 200
+    await Logger.info("aiSuggestLogic", "AI suggested logic successfully", {
+      tenantId: tenant,
+      userId: req.user?._id,
+      totalQuestions: questions?.length || 0,
+      hasFollowUps: logicSuggestions?.followUps?.length > 0
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Logic suggestions generated successfully",
+      data: logicSuggestions
+    });
+
   } catch (error) {
-    next(error);
+    // ❌ Log error only on failure
+    await Logger.error("aiSuggestLogic", "Error generating logic suggestions", {
+      message: error.message,
+      stack: error.stack,
+      tenantId: req.user?.tenant,
+      userId: req.user?._id
+    });
+
+    return res.status(500).json({
+      success: false,
+      message: "Error generating logic suggestions",
+      error: error.message
+    });
   }
 };
 
@@ -694,6 +807,14 @@ Return JSON with logic suggestions.
 exports.aiGenerateThankYouPage = async (req, res, next) => {
   try {
     const { surveyType, companyName, tone = "friendly", includeIncentives = false } = req.body;
+    const tenant = req.user?.tenant;
+
+    if (!tenant) {
+      return res.status(403).json({
+        success: false,
+        message: "Tenant not found or unauthorized"
+      });
+    }
 
     const prompt = `
 Create a thank you page for a ${surveyType} survey from ${companyName}.
@@ -725,9 +846,35 @@ Return JSON with content sections.
       };
     }
 
-    res.json({ success: true, data: thankYouContent });
+    // ✅ Log success only on 200
+    await Logger.info("aiGenerateThankYouPage", "AI generated thank you page successfully", {
+      tenantId: tenant,
+      userId: req.user?._id,
+      surveyType,
+      includeIncentives,
+      tone
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Thank you page generated successfully",
+      data: thankYouContent
+    });
+
   } catch (error) {
-    next(error);
+    // ❌ Log error only on failure
+    await Logger.error("aiGenerateThankYouPage", "Error generating thank you page", {
+      message: error.message,
+      stack: error.stack,
+      tenantId: req.user?.tenant,
+      userId: req.user?._id
+    });
+
+    return res.status(500).json({
+      success: false,
+      message: "Error generating thank you page",
+      error: error.message
+    });
   }
 };
 
@@ -737,6 +884,7 @@ Return JSON with content sections.
 exports.aiAnalyzeFeedback = async (req, res, next) => {
   try {
     const { responses, surveyTitle } = req.body;
+    const tenant = req.user?.tenant;
 
     if (!responses || !Array.isArray(responses) || responses.length === 0) {
       return res.status(400).json({
@@ -780,9 +928,34 @@ Return structured JSON analysis.
       };
     }
 
-    res.json({ success: true, data: analysis });
+    // ✅ Log only when successful (200)
+    await Logger.info("aiAnalyzeFeedback", "AI analyzed feedback successfully", {
+      tenantId: tenant,
+      userId: req.user?._id,
+      surveyTitle,
+      responseCount: responses.length
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Feedback analysis generated successfully",
+      data: analysis
+    });
+
   } catch (error) {
-    next(error);
+    // ❌ Log only on failure
+    await Logger.error("aiAnalyzeFeedback", "Error analyzing feedback", {
+      tenantId: req.user?.tenant,
+      userId: req.user?._id,
+      message: error.message,
+      stack: error.stack
+    });
+
+    return res.status(500).json({
+      success: false,
+      message: "Error analyzing feedback",
+      error: error.message
+    });
   }
 };
 
@@ -792,6 +965,7 @@ Return structured JSON analysis.
 exports.aiGenerateInsights = async (req, res, next) => {
   try {
     const { surveyData, timeframe = "month", companyGoals = [] } = req.body;
+    const tenant = req.user?.tenant;
 
     const prompt = `
 Generate business insights from this survey data over the past ${timeframe}:
@@ -845,8 +1019,33 @@ Return JSON with structured insights.
       };
     }
 
-    res.json({ success: true, data: insights });
+    // ✅ Log only if success (status 200)
+    await Logger.info("aiGenerateInsights", "AI-generated business insights successfully", {
+      tenantId: tenant,
+      userId: req.user?._id,
+      timeframe,
+      goals: companyGoals
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Business insights generated successfully",
+      data: insights
+    });
+
   } catch (error) {
-    next(error);
+    // ❌ Log only if error
+    await Logger.error("aiGenerateInsights", "Error generating insights", {
+      tenantId: req.user?.tenant,
+      userId: req.user?._id,
+      message: error.message,
+      stack: error.stack
+    });
+
+    return res.status(500).json({
+      success: false,
+      message: "Error generating insights",
+      error: error.message
+    });
   }
 };

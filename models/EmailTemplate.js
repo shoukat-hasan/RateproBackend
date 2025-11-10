@@ -5,7 +5,14 @@ const emailTemplateSchema = new mongoose.Schema({
     name: {
         type: String,
         required: true,
-        trim: true
+        trim: true,
+        unique: true
+    },
+    type: {
+        type: String,
+        required: true,
+        trim: true,
+        unique: true
     },
     subject: {
         type: String,

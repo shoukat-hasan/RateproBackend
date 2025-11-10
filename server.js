@@ -6,6 +6,7 @@ const cookieParser = require("cookie-parser");
 const cors = require("cors");
 const path = require("path");
 const { globalLimiter } = require("./middlewares/rateLimiter");
+const cron = require('node-cron');
 const seedUserCategories = require("./seeds/seedUserCategories");
 
 // MongoDB connection and seeding
@@ -82,6 +83,10 @@ app.use("/api/distribution", require("./routes/distributionRoutes"));
 app.use("/api/dashboard", require("./routes/dashboardRoutes"));
 app.use("/api/tickets", require("./routes/ticketRoutes"));
 app.use("/api/email-templates", require("./routes/emailTemplateRoutes.js"));
+
+cron.schedule('*/5 * * * *', () => {
+  require('./controllers/surveyController').autoPublishScheduledSurveys();
+});
 
 // Error Handling Middleware
 const { notFound, errorHandler } = require("./middlewares/errorHandler");
