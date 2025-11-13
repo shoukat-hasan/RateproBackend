@@ -1,7 +1,7 @@
 //  models/AuditLog.js
 const mongoose = require('mongoose');
 
-const surveyPublishLogSchema = new mongoose.Schema({
+const logSchema = new mongoose.Schema({
   logLevel: {
     type: String,
     enum: ['INFO', 'WARNING', 'ERROR', 'DEBUG'],
@@ -12,7 +12,7 @@ const surveyPublishLogSchema = new mongoose.Schema({
     trim: true
   },
   message: {
-    type: String
+    type: mongoose.Schema.Types.Mixed
   },
   // Naye fields add karein general logging ke liye
   action: {
@@ -57,12 +57,12 @@ const surveyPublishLogSchema = new mongoose.Schema({
 });
 
 // Indexes for better performance
-surveyPublishLogSchema.index({ functionName: 1 });
-surveyPublishLogSchema.index({ action: 1 });
-surveyPublishLogSchema.index({ logLevel: 1 });
-surveyPublishLogSchema.index({ status: 1 });
-surveyPublishLogSchema.index({ createdAt: -1 });
-surveyPublishLogSchema.index({ surveyId: 1 });
-surveyPublishLogSchema.index({ userId: 1 });
+logSchema.index({ functionName: 1 });
+logSchema.index({ action: 1 });
+logSchema.index({ logLevel: 1 });
+logSchema.index({ status: 1 });
+logSchema.index({ createdAt: -1 });
+logSchema.index({ surveyId: 1 });
+logSchema.index({ userId: 1 });
 
-module.exports = mongoose.model('SurveyPublishLog', surveyPublishLogSchema);
+module.exports = mongoose.models['AuditLog'] || mongoose.model('AuditLog', logSchema);

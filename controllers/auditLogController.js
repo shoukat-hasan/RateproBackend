@@ -1,5 +1,5 @@
 // controllers/auditLogController.js
-const SurveyPublishLog = require('../models/AuditLog.js');
+const AuditLog = require('../models/AuditLog.js');
 const Logger = require('../utils/auditLog.js');
 
 // Create Log Entry
@@ -77,14 +77,14 @@ exports.getLogs = async (req, res) => {
 
     const skip = (page - 1) * limit;
 
-    const logs = await SurveyPublishLog.find(filter)
+    const logs = await AuditLog.find(filter)
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(parseInt(limit))
       .populate('userId', 'name email')
       .populate('surveyId', 'title');
 
-    const total = await SurveyPublishLog.countDocuments(filter);
+    const total = await AuditLog.countDocuments(filter);
 
     await Logger.info('getLogs', `Found ${logs.length} logs`, {
       total,
@@ -129,7 +129,7 @@ exports.getLogById = async (req, res) => {
       userId: req.user?._id
     });
 
-    const log = await SurveyPublishLog.findById(id)
+    const log = await AuditLog.findById(id)
       .populate('userId', 'name email')
       .populate('surveyId', 'title');
 
@@ -183,7 +183,7 @@ exports.getLogStatistics = async (req, res) => {
     const startDate = new Date();
     startDate.setDate(startDate.getDate() - parseInt(days));
 
-    const statistics = await SurveyPublishLog.aggregate([
+    const statistics = await AuditLog.aggregate([
       {
         $match: {
           createdAt: { $gte: startDate }
@@ -213,7 +213,7 @@ exports.getLogStatistics = async (req, res) => {
     ]);
 
     // Get most frequent errors
-    const frequentErrors = await SurveyPublishLog.aggregate([
+    const frequentErrors = await AuditLog.aggregate([
       {
         $match: {
           logLevel: 'ERROR',
@@ -274,7 +274,7 @@ exports.deleteLog = async (req, res) => {
       userId: req.user?._id
     });
 
-    const log = await SurveyPublishLog.findByIdAndDelete(id);
+    const log = await AuditLog.findByIdAndDelete(id);
 
     if (!log) {
       await Logger.warning('deleteLog', 'Log not found for deletion', {
@@ -326,7 +326,7 @@ exports.cleanOldLogs = async (req, res) => {
     const cutoffDate = new Date();
     cutoffDate.setDate(cutoffDate.getDate() - parseInt(days));
 
-    const result = await SurveyPublishLog.deleteMany({
+    const result = await AuditLog.deleteMany({
       createdAt: { $lt: cutoffDate },
       logLevel: { $ne: 'ERROR' } // Keep all errors
     });

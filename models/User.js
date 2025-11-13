@@ -88,7 +88,7 @@ const userSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: "Department",
     required: function () {
-      return this.role === "member";
+      return this.role === "member" && this.userType === "internal";
     },
     default: null,
   },

@@ -1511,6 +1511,7 @@ const Logger = require("../utils/auditLog");
 
 // Multer setup for Excel
 const multer = require('multer');
+const EmailTemplate = require("../models/EmailTemplate");
 const upload = multer({ storage: multer.memoryStorage() });
 
 // Helper: Generate OTP Code
@@ -1590,198 +1591,750 @@ const updateMeSchema = Joi.object({
 });
 
 // Bulk Create Users from Excel File
+// exports.bulkCreateUsers = async (req, res) => {
+//   try {
+//     const currentUser = req.user;
+//     if (currentUser.role.toLowerCase() !== 'companyadmin') {
+//       return res.status(403).json({ message: 'Access denied: Only CompanyAdmin can perform bulk upload' });
+//     }
+
+//     if (!req.file) {
+//       return res.status(400).json({ message: 'No Excel file uploaded' });
+//     }
+
+//     const workbook = XLSX.read(req.file.buffer, { type: 'buffer' });
+//     const sheetName = workbook.SheetNames[0];
+//     const worksheet = workbook.Sheets[sheetName];
+//     const rows = XLSX.utils.sheet_to_json(worksheet, { header: 1, blankrows: false });
+
+//     if (rows.length < 2) {
+//       return res.status(400).json({ message: 'Empty or invalid Excel file. Must have at least one data row.' });
+//     }
+
+//     const dataRows = rows.slice(1);
+//     const tenantId = currentUser.tenant._id ? currentUser.tenant._id.toString() : currentUser.tenant;
+
+//     const tenantData = await Tenant.findById(tenantId).populate('departments');
+//     if (!tenantId || !tenantData) {
+//       return res.status(403).json({ message: 'Access denied: No valid tenant associated' });
+//     }
+
+//     // === DEPARTMENT MAPPING ===
+//     const deptNamesSet = new Set();
+//     dataRows.forEach(row => { if (row[5]) deptNamesSet.add(row[5].toString().trim()); });
+//     const uniqueDeptNames = Array.from(deptNamesSet);
+//     const deptMap = new Map();
+//     if (uniqueDeptNames.length > 0) {
+//       const existingDepts = await Department.find({ tenant: tenantId, name: { $in: uniqueDeptNames } });
+//       existingDepts.forEach(dept => deptMap.set(dept.name, dept._id.toString()));
+//       const missingDepts = uniqueDeptNames.filter(name => !deptMap.has(name));
+//       if (missingDepts.length > 0) {
+//         const newDepts = missingDepts.map(name => ({ tenant: tenantId, name, head: '' }));
+//         const createdDepts = await Department.insertMany(newDepts);
+//         createdDepts.forEach(dept => deptMap.set(dept.name, dept._id.toString()));
+//         await Tenant.findByIdAndUpdate(tenantId, { $push: { departments: { $each: createdDepts.map(d => d._id) } } });
+//       }
+//     }
+
+//     // === USER CATEGORY MAPPING ===
+//     const categoryNameMap = new Map();
+//     let existingCats = [];
+//     const allCategoryNames = new Set();
+//     dataRows.forEach(row => {
+//       if (row[6]) {
+//         row[6].toString().trim().split(',').map(c => c.trim()).forEach(c => allCategoryNames.add(c));
+//       }
+//     });
+//     if (allCategoryNames.size > 0) {
+//       existingCats = await UserCategory.find({ tenant: tenantId, name: { $in: Array.from(allCategoryNames) }, active: true });
+//       existingCats.forEach(cat => categoryNameMap.set(cat.name, cat._id.toString()));
+//     }
+
+//     // === PROCESS EACH ROW ===
+//     const successes = [];
+//     const errors = [];
+
+//     for (const row of dataRows) {
+//       if (row.length < 6) {
+//         errors.push({ row: row.join(','), message: 'Invalid row: less than 6 columns' });
+//         continue;
+//       }
+
+//       const [name, email, password, role, statusStr, departmentName, categoriesStr] = row.map(val => val?.toString().trim() || '');
+//       let userCategoryIds = [];
+//       let userType = 'internal';
+
+//       if (categoriesStr) {
+//         const catNames = categoriesStr.split(',').map(c => c.trim()).filter(c => c);
+//         userCategoryIds = catNames.map(name => categoryNameMap.get(name)).filter(id => id);
+//         if (catNames.length !== userCategoryIds.length) {
+//           errors.push({ email, message: `Category not found: ${catNames.find(n => !categoryNameMap.has(n))}` });
+//           continue;
+//         }
+//         const hasExternal = userCategoryIds.some(id => existingCats.find(c => c._id.toString() === id)?.type === 'external');
+//         userType = hasExternal ? 'external' : 'internal';
+//       }
+
+//       const isActive = statusStr.toLowerCase() === 'active';
+//       const { error: validationError } = bulkUserSchema.validate({ name, email, password, isActive, role, department: departmentName });
+//       if (validationError) {
+//         errors.push({ email, message: validationError.details[0].message });
+//         continue;
+//       }
+
+//       if (role !== 'member') {
+//         errors.push({ email, message: 'Invalid role, must be "member"' });
+//         continue;
+//       }
+
+//       if (!departmentName) {
+//         errors.push({ email, message: 'Department name is required' });
+//         continue;
+//       }
+
+//       const existingUser = await User.findOne({ email });
+//       if (existingUser) {
+//         errors.push({ email, message: 'User already exists with this email' });
+//         continue;
+//       }
+
+//       const deptId = deptMap.get(departmentName);
+//       if (!deptId) {
+//         errors.push({ email, message: 'Department not found or could not be created' });
+//         continue;
+//       }
+
+//       const hashedPassword = await bcrypt.hash(password, 10);
+//       const newUser = await User.create({
+//         name, email, password: hashedPassword, role: 'member', authProvider: 'local',
+//         tenant: tenantId, department: deptId, isVerified: false, isActive,
+//         createdBy: currentUser._id, deleted: false, phone: '', bio: '', avatar: { public_id: '', url: '' },
+//         userCategories: userCategoryIds, userType, customRoles: [], surveyStats: null,
+//       });
+
+//       const verificationCode = generateOTP();
+//       const expiresAt = moment().add(process.env.OTP_EXPIRE_MINUTES || 15, 'minutes').toDate();
+//       await OTP.create({ email, code: verificationCode, purpose: 'verify', expiresAt });
+//       const baseURL = getBaseURL().public;
+//       const verificationLink = `${baseURL}/verify-email?code=${verificationCode}&email=${encodeURIComponent(email)}`;
+//       // 📧 SEND EMAIL USING TEMPLATE
+//       try {
+//         await sendEmail({
+//           to: email,
+//           templateType: "user_welcome",
+//           templateData: {
+//             userName: name,
+//             userEmail: email,
+//             userPassword: password,
+//             companyName: companyName,
+//             loginLink: loginLink,
+//             verificationLink: verificationLink
+//           }
+//         });
+
+//         await Logger.info(functionName, 'Welcome email sent using template in bulk', {
+//           userId: req.user?._id,
+//           newUserId: newUser._id,
+//           email,
+//           templateType: "user_welcome"
+//         });
+
+//       } catch (emailError) {
+//         // Fallback to basic email
+//         await Logger.warning(functionName, 'Template email failed in bulk, sending basic email', {
+//           userId: req.user?._id,
+//           error: emailError.message
+//         });
+
+//         const fallbackHTML = `
+//             <p>Hello ${name},</p>
+//             <p>Your account has been successfully created.</p>
+//             <p><strong>Login Email:</strong> ${email}</p>
+//             <p><strong>Temporary Password:</strong> ${password}</p>
+//             <p>Please verify your email by clicking the link below:</p>
+//             <p><a href="${verificationLink}" target="_blank">${verificationLink}</a></p>
+//             <p>This code will expire in ${process.env.OTP_EXPIRE_MINUTES} minute(s).</p>
+//             <br/>
+//             <p>Regards,<br/>Team ${companyName}</p>
+//           `;
+
+//         await sendEmail({
+//           to: email,
+//           subject: 'Verify your email - RatePro',
+//           html: fallbackHTML,
+//         });
+//       }
+
+//       successes.push({ id: newUser._id, email: newUser.email });
+//     }
+
+//     // ✅ Success log (only on 201)
+//     await Logger.info({
+//       user: currentUser._id,
+//       action: "Bulk Create Users",
+//       status: "Success",
+//       details: `Bulk user creation completed. Total: ${dataRows.length}, Success: ${successes.length}, Failed: ${errors.length}`
+//     });
+
+//     res.status(201).json({
+//       message: 'Bulk user creation completed',
+//       totalProcessed: dataRows.length,
+//       successful: successes.length,
+//       failed: errors.length,
+//       createdUsers: successes,
+//       errors: errors.length > 0 ? errors : null,
+//     });
+
+//   } catch (err) {
+//     console.error('BulkCreateUsers error:', err);
+
+//     // 🔴 Only catch block logs
+//     await Logger.error({
+//       user: req.user?._id,
+//       action: "Bulk Create Users",
+//       status: "Failed",
+//       details: err.message,
+//     });
+
+//     if (err.code === 11000) {
+//       return res.status(400).json({ message: 'Duplicate email found in database' });
+//     }
+//     res.status(500).json({ message: 'Internal Server Error', error: err.message });
+//   }
+// };
 exports.bulkCreateUsers = async (req, res) => {
+  const functionName = "bulkCreateUsers";
   try {
     const currentUser = req.user;
-    if (currentUser.role !== 'companyAdmin') {
-      return res.status(403).json({ message: 'Access denied: Only CompanyAdmin can perform bulk upload' });
+
+    // 🔒 1. Access Restriction
+    if (currentUser.role?.toLowerCase() !== "companyadmin") {
+      return res.status(403).json({ message: "Access denied: Only CompanyAdmin can perform bulk upload" });
     }
 
-    if (!req.file) {
-      return res.status(400).json({ message: 'No Excel file uploaded' });
+    // 📁 2. Check if file exists
+    if (!req.file || !req.file.buffer) {
+      return res.status(400).json({ message: "No Excel file uploaded" });
     }
 
-    const workbook = XLSX.read(req.file.buffer, { type: 'buffer' });
+    // 📊 3. Parse Excel file
+    const workbook = XLSX.read(req.file.buffer, { type: "buffer" });
+    if (!workbook.SheetNames.length) {
+      return res.status(400).json({ message: "Excel file contains no sheets" });
+    }
+
     const sheetName = workbook.SheetNames[0];
     const worksheet = workbook.Sheets[sheetName];
     const rows = XLSX.utils.sheet_to_json(worksheet, { header: 1, blankrows: false });
 
+    // 🧾 4. Validate row count & header structure
     if (rows.length < 2) {
-      return res.status(400).json({ message: 'Empty or invalid Excel file. Must have at least one data row.' });
+      return res.status(400).json({ message: "Empty or invalid Excel file. Must have at least one data row." });
     }
 
+    const headers = rows[0].map(h => h?.toString().trim().toLowerCase());
+    const requiredHeaders = ["name", "email", "password", "role", "status", "department", "categories"];
+    const missingHeaders = requiredHeaders.filter(h => !headers.includes(h));
+    if (missingHeaders.length) {
+      return res.status(400).json({ message: `Missing columns: ${missingHeaders.join(", ")}` });
+    }
+
+    // 🎯 Extract data rows (excluding headers)
     const dataRows = rows.slice(1);
+
+    // 🏢 5. Tenant Validation
     const tenantId = currentUser.tenant._id ? currentUser.tenant._id.toString() : currentUser.tenant;
-
-    const tenantData = await Tenant.findById(tenantId).populate('departments');
-    if (!tenantId || !tenantData) {
-      return res.status(403).json({ message: 'Access denied: No valid tenant associated' });
+    const tenantData = await Tenant.findById(tenantId).populate("departments");
+    if (!tenantData) {
+      return res.status(403).json({ message: "Access denied: Invalid or missing tenant" });
     }
 
-    // === DEPARTMENT MAPPING ===
-    const deptNamesSet = new Set();
-    dataRows.forEach(row => { if (row[5]) deptNamesSet.add(row[5].toString().trim()); });
-    const uniqueDeptNames = Array.from(deptNamesSet);
-    const deptMap = new Map();
-    if (uniqueDeptNames.length > 0) {
-      const existingDepts = await Department.find({ tenant: tenantId, name: { $in: uniqueDeptNames } });
-      existingDepts.forEach(dept => deptMap.set(dept.name, dept._id.toString()));
-      const missingDepts = uniqueDeptNames.filter(name => !deptMap.has(name));
-      if (missingDepts.length > 0) {
-        const newDepts = missingDepts.map(name => ({ tenant: tenantId, name, head: '' }));
-        const createdDepts = await Department.insertMany(newDepts);
-        createdDepts.forEach(dept => deptMap.set(dept.name, dept._id.toString()));
-        await Tenant.findByIdAndUpdate(tenantId, { $push: { departments: { $each: createdDepts.map(d => d._id) } } });
-      }
-    }
+    const companyName = tenantData.name || "Your Company";
+    const baseURL = getBaseURL().public;
+    const loginLink = `${baseURL}/login`;
 
-    // === USER CATEGORY MAPPING ===
-    const categoryNameMap = new Map();
-    let existingCats = [];
-    const allCategoryNames = new Set();
+    // 🧭 6. Department Mapping (auto-create missing)
+    const deptNames = new Set();
     dataRows.forEach(row => {
-      if (row[6]) {
-        row[6].toString().trim().split(',').map(c => c.trim()).forEach(c => allCategoryNames.add(c));
-      }
+      const deptName = row[5]?.toString().trim().toLowerCase();
+      if (deptName) deptNames.add(deptName);
     });
-    if (allCategoryNames.size > 0) {
-      existingCats = await UserCategory.find({ tenant: tenantId, name: { $in: Array.from(allCategoryNames) }, active: true });
-      existingCats.forEach(cat => categoryNameMap.set(cat.name, cat._id.toString()));
+
+    const uniqueDeptNames = Array.from(deptNames);
+    const deptMap = new Map();
+
+    if (uniqueDeptNames.length) {
+      const existingDepts = await Department.find({
+        tenant: tenantId,
+        name: { $in: uniqueDeptNames },
+      });
+
+      existingDepts.forEach(dept => deptMap.set(dept.name.toLowerCase(), dept._id.toString()));
+
+      const missingDepts = uniqueDeptNames.filter(name => !deptMap.has(name));
+      if (missingDepts.length) {
+        const newDepts = missingDepts.map(name => ({ tenant: tenantId, name, head: "" }));
+        const createdDepts = await Department.insertMany(newDepts);
+        createdDepts.forEach(dept => deptMap.set(dept.name.toLowerCase(), dept._id.toString()));
+
+        await Tenant.findByIdAndUpdate(tenantId, {
+          $push: { departments: { $each: createdDepts.map(d => d._id) } },
+        });
+      }
     }
 
-    // === PROCESS EACH ROW ===
+    // 🏷️ 7. Category Mapping (no auto-create, strict match)
+    const allCatNames = new Set();
+    dataRows.forEach(row => {
+      const cats = row[6]?.toString().trim();
+      if (cats) cats.split(",").forEach(c => allCatNames.add(c.trim().toLowerCase()));
+    });
+
+    const categoryMap = new Map();
+    let existingCats = [];
+    if (allCatNames.size) {
+      existingCats = await UserCategory.find({
+        tenant: tenantId,
+        name: { $in: Array.from(allCatNames) },
+        active: true,
+      });
+      existingCats.forEach(cat => categoryMap.set(cat.name.toLowerCase(), cat._id.toString()));
+    }
+
+    // ⚙️ 8. Process Rows (batched)
     const successes = [];
     const errors = [];
+    const batchSize = 10; // handle 10 users concurrently
 
-    for (const row of dataRows) {
-      if (row.length < 6) {
-        errors.push({ row: row.join(','), message: 'Invalid row: less than 6 columns' });
-        continue;
-      }
+    for (let i = 0; i < dataRows.length; i += batchSize) {
+      const batch = dataRows.slice(i, i + batchSize);
 
-      const [name, email, password, role, statusStr, departmentName, categoriesStr] = row.map(val => val?.toString().trim() || '');
-      let userCategoryIds = [];
-      let userType = 'internal';
+      await Promise.allSettled(
+        batch.map(async (row, idx) => {
+          const rowIndex = i + idx + 2; // Excel row number
+          const [name, email, password, role, statusStr, departmentName, categoriesStr] = row.map(v =>
+            v?.toString().trim() || ""
+          );
 
-      if (categoriesStr) {
-        const catNames = categoriesStr.split(',').map(c => c.trim()).filter(c => c);
-        userCategoryIds = catNames.map(name => categoryNameMap.get(name)).filter(id => id);
-        if (catNames.length !== userCategoryIds.length) {
-          errors.push({ email, message: `Category not found: ${catNames.find(n => !categoryNameMap.has(n))}` });
-          continue;
-        }
-        const hasExternal = userCategoryIds.some(id => existingCats.find(c => c._id.toString() === id)?.type === 'external');
-        userType = hasExternal ? 'external' : 'internal';
-      }
+          // ❌ Skip incomplete rows
+          if (!email || !password || !departmentName) {
+            errors.push({ rowIndex, email, message: "Missing required fields" });
+            return;
+          }
 
-      const isActive = statusStr.toLowerCase() === 'active';
-      const { error: validationError } = bulkUserSchema.validate({ name, email, password, isActive, role, department: departmentName });
-      if (validationError) {
-        errors.push({ email, message: validationError.details[0].message });
-        continue;
-      }
+          // ✅ Category resolve
+          let userCategoryIds = [];
+          let userType = "internal";
+          if (categoriesStr) {
+            const catNames = categoriesStr
+              .split(",")
+              .map(c => c.trim().toLowerCase())
+              .filter(c => c);
 
-      if (role !== 'member') {
-        errors.push({ email, message: 'Invalid role, must be "member"' });
-        continue;
-      }
+            userCategoryIds = catNames
+              .map(n => categoryMap.get(n))
+              .filter(id => id);
 
-      if (!departmentName) {
-        errors.push({ email, message: 'Department name is required' });
-        continue;
-      }
+            if (catNames.length !== userCategoryIds.length) {
+              const missingCat = catNames.find(n => !categoryMap.has(n));
+              errors.push({ rowIndex, email, message: `Category not found: ${missingCat}` });
+              return;
+            }
 
-      const existingUser = await User.findOne({ email });
-      if (existingUser) {
-        errors.push({ email, message: 'User already exists with this email' });
-        continue;
-      }
+            const hasExternal = userCategoryIds.some(id =>
+              existingCats.find(c => c._id.toString() === id && c.type === "external")
+            );
+            userType = hasExternal ? "external" : "internal";
+          }
 
-      const deptId = deptMap.get(departmentName);
-      if (!deptId) {
-        errors.push({ email, message: 'Department not found or could not be created' });
-        continue;
-      }
+          // ✅ Schema validation
+          const isActive = statusStr.toLowerCase() === "active";
+          const { error: validationError } = bulkUserSchema.validate({
+            name,
+            email,
+            password,
+            isActive,
+            role,
+            department: departmentName,
+          });
+          if (validationError) {
+            errors.push({ rowIndex, email, message: validationError.details[0].message });
+            return;
+          }
 
-      const hashedPassword = await bcrypt.hash(password, 10);
-      const newUser = await User.create({
-        name, email, password: hashedPassword, role: 'member', authProvider: 'local',
-        tenant: tenantId, department: deptId, isVerified: false, isActive,
-        createdBy: currentUser._id, deleted: false, phone: '', bio: '', avatar: { public_id: '', url: '' },
-        userCategories: userCategoryIds, userType, customRoles: [], surveyStats: null,
-      });
+          // 🚫 Only 'member' role allowed
+          if (role.toLowerCase() !== "member") {
+            errors.push({ rowIndex, email, message: "Invalid role, must be 'member'" });
+            return;
+          }
 
-      const verificationCode = generateOTP();
-      const expiresAt = moment().add(process.env.OTP_EXPIRE_MINUTES || 15, 'minutes').toDate();
-      await OTP.create({ email, code: verificationCode, purpose: 'verify', expiresAt });
-      const baseURL = getBaseURL().public;
-      const verificationLink = `${baseURL}/verify-email?code=${verificationCode}&email=${encodeURIComponent(email)}`;
-      await sendEmail({
-        to: email,
-        subject: 'Verify your email - RatePro',
-        html: `<p>Hello ${name},</p>
-               <p>Your account has been successfully created.</p>
-               <p><strong>Login Email:</strong> ${email}</p>
-               <p><strong>Temporary Password:</strong> ${password}</p>
-               <p>Please verify your email: <a href="${verificationLink}" target="_blank">${verificationLink}</a></p>
-               <p>This code will expire in ${process.env.OTP_EXPIRE_MINUTES || 15} minute(s).</p>
-               <br/><p>Regards,<br/>Team RatePro</p>`,
-      });
+          // 🏢 Department lookup
+          const deptId = deptMap.get(departmentName.toLowerCase());
+          if (!deptId) {
+            errors.push({ rowIndex, email, message: "Department not found" });
+            return;
+          }
 
-      successes.push({ id: newUser._id, email: newUser.email });
+          // 📬 Skip if user exists
+          const existingUser = await User.findOne({ email });
+          if (existingUser) {
+            errors.push({ rowIndex, email, message: "User already exists" });
+            return;
+          }
+
+          // 🔐 Create new user
+          const hashedPassword = await bcrypt.hash(password, 10);
+          const newUser = await User.create({
+            name,
+            email,
+            password: hashedPassword,
+            role: "member",
+            authProvider: "local",
+            tenant: tenantId,
+            department: deptId,
+            isVerified: false,
+            isActive,
+            createdBy: currentUser._id,
+            deleted: false,
+            phone: "",
+            bio: "",
+            avatar: { public_id: "", url: "" },
+            userCategories: userCategoryIds,
+            userType,
+            customRoles: [],
+            surveyStats: null,
+          });
+
+          // 📧 Send verification email
+          const verificationCode = generateOTP();
+          const expiresAt = moment().add(process.env.OTP_EXPIRE_MINUTES || 15, "minutes").toDate();
+          await OTP.create({ email, code: verificationCode, purpose: "verify", expiresAt });
+
+          const verificationLink = `${baseURL}/verify-email?code=${verificationCode}&email=${encodeURIComponent(email)}`;
+
+          try {
+            await sendEmail({
+              to: email,
+              templateType: "user_welcome",
+              templateData: {
+                userName: name,
+                userEmail: email,
+                userPassword: password,
+                companyName,
+                loginLink,
+                verificationLink,
+              },
+            });
+
+            await Logger.info({
+              user: req.user?._id,
+              action: functionName,
+              status: "EmailSent",
+              details: `Welcome email sent to ${email}`,
+            });
+          } catch (emailError) {
+            // 📨 Fallback basic email
+            const fallbackHTML = `
+              <p>Hello ${name},</p>
+              <p>Your account has been created successfully.</p>
+              <p><strong>Email:</strong> ${email}</p>
+              <p><strong>Password:</strong> ${password}</p>
+              <p>Verify your email here: <a href="${verificationLink}" target="_blank">${verificationLink}</a></p>
+              <p>This link expires in ${process.env.OTP_EXPIRE_MINUTES} minute(s).</p>
+              <br/><p>Regards,<br/>Team ${companyName}</p>
+            `;
+            await sendEmail({
+              to: email,
+              subject: `Verify your email - ${companyName}`,
+              html: fallbackHTML,
+            });
+          }
+
+          successes.push({ id: newUser._id, email: newUser.email });
+        })
+      );
     }
 
-    // ✅ Success log (only on 201)
+    // 🪵 9. Log final summary
     await Logger.info({
       user: currentUser._id,
-      action: "Bulk Create Users",
-      status: "Success",
-      details: `Bulk user creation completed. Total: ${dataRows.length}, Success: ${successes.length}, Failed: ${errors.length}`
+      action: functionName,
+      status: "Completed",
+      details: `Bulk creation done. Total: ${dataRows.length}, Success: ${successes.length}, Failed: ${errors.length}`,
     });
 
+    // ✅ 10. Response
     res.status(201).json({
-      message: 'Bulk user creation completed',
+      message: "Bulk user creation completed",
       totalProcessed: dataRows.length,
       successful: successes.length,
       failed: errors.length,
       createdUsers: successes,
-      errors: errors.length > 0 ? errors : null,
+      errors: errors.length ? errors : null,
     });
 
   } catch (err) {
-    console.error('BulkCreateUsers error:', err);
+    console.error("BulkCreateUsers error:", err);
 
-    // 🔴 Only catch block logs
     await Logger.error({
       user: req.user?._id,
-      action: "Bulk Create Users",
+      action: functionName,
       status: "Failed",
       details: err.message,
     });
 
     if (err.code === 11000) {
-      return res.status(400).json({ message: 'Duplicate email found in database' });
+      return res.status(400).json({ message: "Duplicate email found in database" });
     }
-    res.status(500).json({ message: 'Internal Server Error', error: err.message });
+
+    res.status(500).json({ message: "Internal Server Error", error: err.message });
   }
 };
 
 // Create User with Role-Based and Tenant-Based Restrictions
+// exports.createUser = async (req, res) => {
+//   try {
+//     // Validate request
+//     const { error } = createUserSchema.validate(req.body);
+//     if (error) return res.status(400).json({ message: error.details[0].message });
+
+//     const { name, email, password, role, tenant, department, tenantName } = req.body;
+//     const currentUser = req.user;
+
+//     // Check existing user
+//     if (await User.findOne({ email })) {
+//       return res.status(400).json({ message: 'User already exists with this email.' });
+//     }
+
+//     // Role restrictions
+//     if (currentUser.role === 'admin' && !['companyAdmin', 'user'].includes(role)) {
+//       return res.status(403).json({ message: 'Admin can only create CompanyAdmin or User.' });
+//     }
+//     if (currentUser.role === 'companyAdmin' && role !== 'member') {
+//       return res.status(403).json({ message: 'CompanyAdmin can only create Member role.' });
+//     }
+
+//     // Member permissions
+//     if (currentUser.role === 'member') {
+//       const populatedUser = await User.findById(currentUser._id).populate({
+//         path: "customRoles",
+//         populate: { path: "permissions" }
+//       });
+//       if (!populatedUser) return res.status(404).json({ message: "User not found" });
+
+//       const hasPermission = populatedUser.customRoles?.some(
+//         (r) => r.permissions?.some(p => p.name === "user:create")
+//       );
+
+//       if (!hasPermission) {
+//         return res.status(403).json({ message: "Access denied: Permission 'user:create' required" });
+//       }
+//     }
+
+//     // Tenant validation
+//     let tenantId = tenant;
+//     if (currentUser.role === 'companyAdmin' && role === 'member') {
+//       if (!currentUser.tenant) return res.status(403).json({ message: 'No tenant associated' });
+//       const userTenantId = currentUser.tenant._id?.toString() || currentUser.tenant;
+//       tenantId = tenant || userTenantId;
+//       if (tenant && tenant !== userTenantId) return res.status(403).json({ message: 'Invalid tenant' });
+//     }
+
+//     // Department check
+//     if (role === 'member' && department) {
+//       if (!mongoose.Types.ObjectId.isValid(tenantId)) {
+//         return res.status(400).json({ message: 'Invalid tenant ID' });
+//       }
+//       const tenantData = await Tenant.findById(tenantId).populate('departments');
+//       if (!tenantData || !tenantData.departments.some(d => d._id.toString() === department)) {
+//         return res.status(400).json({ message: 'Invalid department for this tenant' });
+//       }
+//     }
+
+//     // User categories
+//     let userCategories = [];
+//     if (req.body.userCategories?.length) {
+//       const validCategories = await UserCategory.find({
+//         _id: { $in: req.body.userCategories },
+//         tenant: tenantId,
+//         active: true,
+//       });
+
+//       if (validCategories.length !== req.body.userCategories.length) {
+//         return res.status(400).json({ message: 'Invalid or unauthorized user categories' });
+//       }
+
+//       userCategories = validCategories.map(c => c._id);
+//     }
+
+//     // Hash password
+//     const hashedPassword = await bcrypt.hash(password, 10);
+//     let newUser;
+
+//     if (role === 'companyAdmin') {
+//       const tempUser = new User({
+//         name, email, password: hashedPassword, role, tenant: null, department: null,
+//         isVerified: false, createdBy: currentUser._id,
+//       });
+//       await tempUser.save({ validateBeforeSave: false });
+
+//       const newTenant = await Tenant.create({
+//         name: tenantName?.trim() || `${name}'s Company`,
+//         admin: tempUser._id,
+//         createdBy: currentUser._id,
+//       });
+
+//       tempUser.tenant = newTenant._id;
+//       await tempUser.save();
+//       newUser = tempUser;
+//       tenantId = newTenant._id;
+
+//     } else {
+//       newUser = await User.create({
+//         name, email, password: hashedPassword, role, tenant: tenantId,
+//         department: role === 'member' ? department : null,
+//         isVerified: false, createdBy: currentUser._id,
+//         userCategories,
+//         userType: userCategories.some(id => validCategories.find(c => c._id.toString() === id.toString())?.type === 'external') ? 'external' : 'internal'
+//       });
+//     }
+
+//     // // OTP + verification email
+//     // const verificationCode = generateOTP();
+//     // const expiresAt = moment().add(process.env.OTP_EXPIRE_MINUTES || 15, 'minutes').toDate();
+//     // await OTP.create({ email, code: verificationCode, purpose: 'verify', expiresAt });
+
+//     // const baseURL = role === 'user' ? getBaseURL().public : getBaseURL().admin;
+//     // const verificationLink = `${baseURL}/verify-email?code=${verificationCode}&email=${encodeURIComponent(email)}`;
+
+//     // await sendEmail({
+//     //   to: email,
+//     //   subject: 'Verify your email - RatePro',
+//     //   html: `
+//     //     <p>Hello ${name},</p>
+//     //     <p>Your account has been successfully created.</p>
+//     //     <p><strong>Login Email:</strong> ${email}</p>
+//     //     <p><strong>Temporary Password:</strong> ${password}</p>
+//     //     <p>Please verify your email: <a href="${verificationLink}" target="_blank">${verificationLink}</a></p>
+//     //     <p>This code will expire in ${process.env.OTP_EXPIRE_MINUTES} minute(s).</p>
+//     //     <br/><p>Regards,<br/>Team</p>
+//     //   `,
+//     // });
+
+//     // // ✅ Success log
+//     // await Logger.info({
+//     //   user: currentUser._id,
+//     //   action: "Create User",
+//     //   status: "Success",
+//     //   details: `User ${email} created with role ${role} by ${currentUser._id}`
+//     // });
+//     // OTP
+//     const verificationCode = generateOTP();
+//     const expiresAt = moment().add(process.env.OTP_EXPIRE_MINUTES || 15, 'minutes').toDate();
+//     await OTP.create({ email, code: verificationCode, purpose: 'verify', expiresAt });
+
+//     const baseURLs = getBaseURL();
+//     const baseURL = role === 'user' ? baseURLs.public : baseURLs.admin;
+//     const verificationLink = `${baseURL}/verify-email?code=${verificationCode}&email=${encodeURIComponent(email)}`;
+//     const loginLink = `${baseURL}/login`;
+
+//     // Get company name for email
+//     let companyName = "Our Platform";
+//     if (role === 'companyAdmin' && newTenant) {
+//       companyName = newTenant.name;
+//     } else if (tenantId) {
+//       const tenantData = await Tenant.findById(tenantId);
+//       companyName = tenantData?.name || "Our Platform";
+//     }
+
+//     // 📧 SEND EMAIL USING TEMPLATE
+//     try {
+//       await sendEmail({
+//         to: email,
+//         templateType: "user_welcome", // Ye database ke template type se match karega
+//         templateData: {
+//           userName: name,
+//           userEmail: email,
+//           userPassword: password, // Temporary password
+//           companyName: companyName,
+//           loginLink: loginLink,
+//           verificationLink: verificationLink
+//         }
+//       });
+
+//       await Logger.info(functionName, 'Welcome email sent using template', {
+//         userId: req.user?._id,
+//         newUserId: newUser._id,
+//         email,
+//         templateType: "user_welcome"
+//       });
+
+//     } catch (emailError) {
+//       // Agar template nahi mila ya email fail hui, to fallback to basic email
+//       await Logger.warning(functionName, 'Template email failed, sending basic email', {
+//         userId: req.user?._id,
+//         error: emailError.message
+//       });
+
+//       const fallbackHTML = `
+//         <p>Hello ${name},</p>
+//         <p>Your account has been successfully created.</p>
+//         <p><strong>Login Email:</strong> ${email}</p>
+//         <p><strong>Temporary Password:</strong> ${password}</p>
+//         <p>Please verify your email by clicking the link below:</p>
+//         <p><a href="${verificationLink}" target="_blank">${verificationLink}</a></p>
+//         <p>This code will expire in ${process.env.OTP_EXPIRE_MINUTES} minute(s).</p>
+//         <br/>
+//         <p>Regards,<br/>Team ${companyName}</p>
+//       `;
+
+//       await sendEmail({
+//         to: email,
+//         subject: 'Verify your email - RatePro',
+//         html: fallbackHTML,
+//       });
+//     }
+
+//     res.status(201).json({
+//       message: 'User created successfully. Verification email sent.',
+//       user: {
+//         id: newUser._id,
+//         email: newUser.email,
+//         role: newUser.role,
+//         tenant: newUser.tenant,
+//         isVerified: newUser.isVerified,
+//       },
+//     });
+
+//   } catch (err) {
+//     console.error('CreateUser error:', err);
+
+//     // 🔴 Only catch block logs
+//     await Logger.error({
+//       user: req.user?._id,
+//       action: "Create User",
+//       status: "Failed",
+//       details: err.message,
+//     });
+
+//     res.status(500).json({ message: 'Internal Server Error' });
+//   }
+// };
 exports.createUser = async (req, res) => {
   try {
-    // Validate request
+    // ✅ 1. Input Validation
     const { error } = createUserSchema.validate(req.body);
     if (error) return res.status(400).json({ message: error.details[0].message });
 
     const { name, email, password, role, tenant, department, tenantName } = req.body;
     const currentUser = req.user;
 
-    // Check existing user
+    // ✅ 2. Duplicate Email Check
     if (await User.findOne({ email })) {
       return res.status(400).json({ message: 'User already exists with this email.' });
     }
 
-    // Role restrictions
+    // ✅ 3. Role-Based Access Control
     if (currentUser.role === 'admin' && !['companyAdmin', 'user'].includes(role)) {
       return res.status(403).json({ message: 'Admin can only create CompanyAdmin or User.' });
     }
@@ -1789,7 +2342,7 @@ exports.createUser = async (req, res) => {
       return res.status(403).json({ message: 'CompanyAdmin can only create Member role.' });
     }
 
-    // Member permissions
+    // ✅ 4. Permission Check (for custom roles)
     if (currentUser.role === 'member') {
       const populatedUser = await User.findById(currentUser._id).populate({
         path: "customRoles",
@@ -1806,7 +2359,7 @@ exports.createUser = async (req, res) => {
       }
     }
 
-    // Tenant validation
+    // ✅ 5. Tenant Validation
     let tenantId = tenant;
     if (currentUser.role === 'companyAdmin' && role === 'member') {
       if (!currentUser.tenant) return res.status(403).json({ message: 'No tenant associated' });
@@ -1815,7 +2368,7 @@ exports.createUser = async (req, res) => {
       if (tenant && tenant !== userTenantId) return res.status(403).json({ message: 'Invalid tenant' });
     }
 
-    // Department check
+    // ✅ 6. Department Validation (for member creation)
     if (role === 'member' && department) {
       if (!mongoose.Types.ObjectId.isValid(tenantId)) {
         return res.status(400).json({ message: 'Invalid tenant ID' });
@@ -1826,13 +2379,17 @@ exports.createUser = async (req, res) => {
       }
     }
 
-    // User categories
+    // ✅ 7. User Categories Validation
     let userCategories = [];
+    let validCategories = [];
     if (req.body.userCategories?.length) {
-      const validCategories = await UserCategory.find({
+      validCategories = await UserCategory.find({
         _id: { $in: req.body.userCategories },
-        tenant: tenantId,
         active: true,
+        $or: [
+          { tenant: tenantId }, // tenant-specific
+          { tenant: null }      // global category
+        ]
       });
 
       if (validCategories.length !== req.body.userCategories.length) {
@@ -1842,10 +2399,12 @@ exports.createUser = async (req, res) => {
       userCategories = validCategories.map(c => c._id);
     }
 
-    // Hash password
+    // ✅ 8. Password Hashing
     const hashedPassword = await bcrypt.hash(password, 10);
     let newUser;
+    let newTenant = null; // 🔥 added — to fix reference later in email section
 
+    // ✅ 9. Create User or CompanyAdmin
     if (role === 'companyAdmin') {
       const tempUser = new User({
         name, email, password: hashedPassword, role, tenant: null, department: null,
@@ -1853,7 +2412,7 @@ exports.createUser = async (req, res) => {
       });
       await tempUser.save({ validateBeforeSave: false });
 
-      const newTenant = await Tenant.create({
+      newTenant = await Tenant.create({
         name: tenantName?.trim() || `${name}'s Company`,
         admin: tempUser._id,
         createdBy: currentUser._id,
@@ -1870,40 +2429,95 @@ exports.createUser = async (req, res) => {
         department: role === 'member' ? department : null,
         isVerified: false, createdBy: currentUser._id,
         userCategories,
-        userType: userCategories.some(id => validCategories.find(c => c._id.toString() === id.toString())?.type === 'external') ? 'external' : 'internal'
+        userType: userCategories.some(id =>
+          validCategories.find(c => c._id.toString() === id.toString())?.type === 'external'
+        ) ? 'external' : 'internal'
       });
     }
 
-    // OTP + verification email
+    // ✅ 10. OTP Generation + Expiry
     const verificationCode = generateOTP();
     const expiresAt = moment().add(process.env.OTP_EXPIRE_MINUTES || 15, 'minutes').toDate();
     await OTP.create({ email, code: verificationCode, purpose: 'verify', expiresAt });
 
-    const baseURL = role === 'user' ? getBaseURL().public : getBaseURL().admin;
+    // ✅ 11. Base URL Logic
+    const baseURLs = getBaseURL();
+    const baseURL = role === 'user' ? baseURLs.public : baseURLs.admin;
     const verificationLink = `${baseURL}/verify-email?code=${verificationCode}&email=${encodeURIComponent(email)}`;
+    const loginLink = `${baseURL}/login`;
 
-    await sendEmail({
-      to: email,
-      subject: 'Verify your email - RatePro',
-      html: `
-        <p>Hello ${name},</p>
+    // ✅ 12. Company Name Resolve (for email)
+    let companyName = "Our Platform";
+    if (role === 'companyAdmin' && newTenant) {
+      companyName = newTenant.name;
+    } else if (tenantId) {
+      const tenantData = await Tenant.findById(tenantId);
+      companyName = tenantData?.name || "Our Platform";
+    }
+
+    // ✅ 13. Send Email with Template
+    try {
+      // Fetch template
+      const template = await EmailTemplate.findOne({ type: "user_welcome", isActive: true });
+      if (!template) throw new Error("Email template not found");
+
+      // Auto-map variables safely
+      const templateData = {};
+      template.variables.forEach((v) => {
+        switch (v) {
+          case "userName": templateData[v] = name; break;
+          case "userEmail": templateData[v] = email; break;
+          case "userPassword": templateData[v] = password; break;
+          case "companyName": templateData[v] = companyName; break;
+          case "verificationLink": templateData[v] = verificationLink; break;
+          case "loginLink": templateData[v] = loginLink; break;
+          case "otpExpireMinutes": templateData[v] = process.env.OTP_EXPIRE_MINUTES; break;
+          case "currentYear": templateData[v] = new Date().getFullYear(); break;
+          default: templateData[v] = ""; // Safe fallback
+        }
+      });
+
+      await sendEmail({
+        to: email,
+        templateType: template.type,
+        templateData
+      });
+
+      console.log("Template email sent with data:", templateData);
+
+      await Logger.info('createUser', 'Welcome email sent using template', {
+        userId: req.user?._id,
+        newUserId: newUser._id,
+        email,
+      });
+
+    } catch (emailError) {
+      // ⚠️ 14. Email Fallback (Basic HTML)
+      await Logger.warning('createUser', 'Template email failed, sending basic email', {
+        userId: req.user?._id,
+        error: emailError.message
+      });
+
+      const fallbackHTML = `
+        <p>Hello ${name || req.body.name},</p>
         <p>Your account has been successfully created.</p>
-        <p><strong>Login Email:</strong> ${email}</p>
-        <p><strong>Temporary Password:</strong> ${password}</p>
-        <p>Please verify your email: <a href="${verificationLink}" target="_blank">${verificationLink}</a></p>
-        <p>This code will expire in ${process.env.OTP_EXPIRE_MINUTES} minute(s).</p>
-        <br/><p>Regards,<br/>Team</p>
-      `,
-    });
+        <p><strong>Login Email:</strong> ${email || req.body.email}</p>
+        <p><strong>Temporary Password:</strong> ${password || req.body.password}</p>
+        <p>Please verify your email by clicking the link below:</p>
+        <p><a href="${verificationLink}" target="_blank">${verificationLink}</a></p>
+        <p>This code will expire in ${process.env.OTP_EXPIRE_MINUTES || 15} minute(s).</p>
+        <br/>
+        <p>Regards,<br/>Team ${companyName || "Our Platform"}</p>
+      `;
 
-    // ✅ Success log
-    await Logger.info({
-      user: currentUser._id,
-      action: "Create User",
-      status: "Success",
-      details: `User ${email} created with role ${role} by ${currentUser._id}`
-    });
+      await sendEmail({
+        to: email,
+        subject: 'Verify your email - RatePro',
+        html: fallbackHTML,
+      });
+    }
 
+    // ✅ 15. Success Response
     res.status(201).json({
       message: 'User created successfully. Verification email sent.',
       user: {
@@ -1918,7 +2532,7 @@ exports.createUser = async (req, res) => {
   } catch (err) {
     console.error('CreateUser error:', err);
 
-    // 🔴 Only catch block logs
+    // 🔴 16. Error Logging
     await Logger.error({
       user: req.user?._id,
       action: "Create User",
@@ -1929,6 +2543,7 @@ exports.createUser = async (req, res) => {
     res.status(500).json({ message: 'Internal Server Error' });
   }
 };
+
 
 // Update User with Role-Based and Tenant-Based Restrictions
 exports.updateUser = async (req, res, next) => {
@@ -2454,38 +3069,155 @@ exports.exportUserDataPDF = async (req, res, next) => {
 };
 
 // send notification email to user
+// exports.sendNotification = async (req, res, next) => {
+//   const functionName = 'sendNotification';
+//   try {
+//     const { error: bodyError } = notificationSchema.validate(req.body);
+//     const { error: paramError } = idSchema.validate(req.params);
+//     if (bodyError || paramError) {
+//       await Logger.warn("Invalid request for sendNotification", { error: (bodyError || paramError).details[0].message });
+//       return res.status(400).json({ message: (bodyError || paramError).details[0].message });
+//     }
+
+//     const { subject, message } = req.body;
+//     const user = await User.findById(req.params.id);
+//     if (!user) {
+//       await Logger.warn("User not found in sendNotification", { userId: req.params.id });
+//       return res.status(404).json({ message: "User not found" });
+//     }
+
+//     if (req.user.role !== "admin" && user.tenant && req.tenantId !== user.tenant.toString()) {
+//       await Logger.warn("Access denied due to tenant mismatch", { requesterId: req.user._id, userTenant: user.tenant });
+//       return res.status(403).json({ message: "Access denied: Wrong tenant" });
+//     }
+
+//     // 📧 SEND EMAIL USING TEMPLATE SYSTEM
+//     try {
+//       await sendEmail({
+//         to: user.email,
+//         templateType: "admin_notification",
+//         templateData: {
+//           userName: user.name,
+//           userEmail: user.email,
+//           notificationSubject: subject,
+//           notificationMessage: message,
+//           companyName: "RatePro"
+//         }
+//       });
+
+//       await Logger.info(functionName, 'Notification email sent using template', {
+//         userId: req.user?._id,
+//         targetUserId: req.params.id,
+//         userEmail: user.email,
+//         subject,
+//         templateType: "admin_notification"
+//       });
+
+//     } catch (templateError) {
+//       // Fallback to basic email if template fails
+//       await Logger.warning(functionName, 'Template email failed, using fallback', {
+//         userId: req.user?._id,
+//         targetUserId: req.params.id,
+//         error: templateError.message
+//       });
+
+//       await sendEmail({
+//         to: user.email,
+//         subject: subject,
+//         html: `<p>${message}</p>`,
+//       });
+//     }
+
+//     res.status(200).json({ message: "Notification email sent" });
+//   } catch (err) {
+//     await Logger.error("sendNotification failed", { message: err.message, stack: err.stack });
+//     next(err);
+//   }
+// };
 exports.sendNotification = async (req, res, next) => {
+  const functionName = 'sendNotification';
+
   try {
+    // 🧩 Step 1: Request validation (body + params dono check)
     const { error: bodyError } = notificationSchema.validate(req.body);
     const { error: paramError } = idSchema.validate(req.params);
+
     if (bodyError || paramError) {
-      await Logger.warn("Invalid request for sendNotification", { error: (bodyError || paramError).details[0].message });
-      return res.status(400).json({ message: (bodyError || paramError).details[0].message });
+      // ⚠️ Agar validation fail ho jaye to warning log karo aur 400 bhej do
+      await Logger.warn("Invalid request for sendNotification", {
+        error: (bodyError || paramError).details[0].message
+      });
+      return res.status(400).json({
+        message: (bodyError || paramError).details[0].message
+      });
     }
 
+    // 🧠 Step 2: Extract fields from request
     const { subject, message } = req.body;
     const user = await User.findById(req.params.id);
+
+    // ❌ Step 3: Check agar user exist nahi karta
     if (!user) {
       await Logger.warn("User not found in sendNotification", { userId: req.params.id });
       return res.status(404).json({ message: "User not found" });
     }
 
+    // 🔒 Step 4: Tenant level access control check
+    // sirf admin ya same-tenant user hi doosre tenant ko message bhej sakta hai
     if (req.user.role !== "admin" && user.tenant && req.tenantId !== user.tenant.toString()) {
-      await Logger.warn("Access denied due to tenant mismatch", { requesterId: req.user._id, userTenant: user.tenant });
+      await Logger.warn("Access denied due to tenant mismatch", {
+        requesterId: req.user._id,
+        userTenant: user.tenant
+      });
       return res.status(403).json({ message: "Access denied: Wrong tenant" });
     }
 
-    await sendEmail({
-      to: user.email,
-      subject,
-      html: `<p>${message}</p>`,
-    });
+    // ✉️ Step 5: Try sending email using predefined template
+    try {
+      await sendEmail({
+        to: user.email,
+        templateType: "admin_notification",
+        templateData: {
+          userName: user.name,
+          userEmail: user.email,
+          notificationSubject: subject,
+          notificationMessage: message,
+          companyName: "RatePro"
+        }
+      });
 
-    await Logger.info("Notification email sent successfully", { to: user.email, subject });
+      await Logger.info(functionName, 'Notification email sent using template', {
+        userId: req.user?._id,
+        targetUserId: req.params.id,
+        userEmail: user.email,
+        subject,
+        templateType: "admin_notification"
+      });
 
+    } catch (templateError) {
+      // 🔁 Step 6: Agar template fail ho jaye to fallback simple email se
+      await Logger.warn(functionName, 'Template email failed, using fallback', {
+        userId: req.user?._id,
+        targetUserId: req.params.id,
+        error: templateError.message
+      });
+
+      await sendEmail({
+        to: user.email,
+        subject,
+        html: `<p>${message}</p>`,
+      });
+    }
+
+    // ✅ Step 7: Response success
     res.status(200).json({ message: "Notification email sent" });
+
   } catch (err) {
-    await Logger.error("sendNotification failed", { message: err.message, stack: err.stack });
+    // 🧯 Step 8: Exception catch & error log
+    await Logger.error("sendNotification failed", {
+      message: err.message,
+      stack: err.stack
+    });
     next(err);
   }
 };

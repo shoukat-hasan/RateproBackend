@@ -213,26 +213,86 @@
 const EmailTemplate = require("../models/EmailTemplate");
 const Logger = require("../utils/auditLog");
 
+const extractVariables = (body) => {
+    if (!body) return [];
+    // Regex to detect ${variableName}
+    const regex = /\$\{(\w+)\}/g;
+    const vars = new Set();
+    let match;
+    while ((match = regex.exec(body)) !== null) {
+        vars.add(match[1]);
+    }
+    return Array.from(vars);
+};
+
+
 // CREATE template
+// exports.createTemplate = async (req, res) => {
+//     try {
+//         const { name, subject, body, variables, description, type } = req.body;
+
+//         const existingTemplate = await EmailTemplate.findOne({ name });
+//         if (existingTemplate) {
+//             return res.status(400).json({ message: "Template name already exists" });
+//         }
+
+//         const template = new EmailTemplate({
+//             name,
+//             subject,
+//             body,
+//             variables: variables || [],
+//             description,
+//             type: type || "default",
+//             isActive: true
+//         });
+
+//         await template.save();
+
+//         await Logger.info('createTemplate', 'Email template created', { templateId: template._id, name });
+
+//         res.status(201).json({
+//             success: true,
+//             message: "Template created successfully",
+//             data: template
+//         });
+//     } catch (error) {
+//         console.error('createTemplate error:', error);
+//         await Logger.error('createTemplate', 'Failed to create email template', { message: error.message, stack: error.stack });
+//         res.status(500).json({
+//             success: false,
+//             message: error.message
+//         });
+//     }
+// };
 exports.createTemplate = async (req, res) => {
     try {
-        const { name, subject, body, variables, description } = req.body;
+        const { name, subject, body, description, type } = req.body;
 
+        console.log("📥 Entering createTemplate");
+        console.log("📥 Request Body:", req.body);
+
+        // Check duplicate template name
         const existingTemplate = await EmailTemplate.findOne({ name });
         if (existingTemplate) {
             return res.status(400).json({ message: "Template name already exists" });
         }
 
+        // Auto-detect variables from body
+        const variables = extractVariables(body);
+
         const template = new EmailTemplate({
             name,
             subject,
             body,
-            variables: variables || [],
-            description,
+            variables,
+            description: description || '',
+            type: type || 'default',
             isActive: true
         });
 
         await template.save();
+
+        console.log("✅ Template created successfully:", template);
 
         await Logger.info('createTemplate', 'Email template created', { templateId: template._id, name });
 
@@ -241,13 +301,11 @@ exports.createTemplate = async (req, res) => {
             message: "Template created successfully",
             data: template
         });
+
     } catch (error) {
         console.error('createTemplate error:', error);
         await Logger.error('createTemplate', 'Failed to create email template', { message: error.message, stack: error.stack });
-        res.status(500).json({
-            success: false,
-            message: error.message
-        });
+        res.status(500).json({ success: false, message: error.message });
     }
 };
 
@@ -316,9 +374,58 @@ exports.getTemplateById = async (req, res) => {
 };
 
 // UPDATE template
+// exports.updateTemplate = async (req, res) => {
+//     try {
+//         const { name, subject, body, variables, description, isActive } = req.body;
+
+//         const template = await EmailTemplate.findById(req.params.id);
+//         if (!template) {
+//             return res.status(404).json({ success: false, message: "Template not found" });
+//         }
+
+//         // Check if name already exists (excluding current template)
+//         if (name && name !== template.name) {
+//             const existingTemplate = await EmailTemplate.findOne({ name });
+//             if (existingTemplate) {
+//                 return res.status(400).json({ message: "Template name already exists" });
+//             }
+//         }
+
+//         const updateData = {
+//             name: name || template.name,
+//             subject: subject || template.subject,
+//             body: body || template.body,
+//             variables: variables || template.variables,
+//             description: description || template.description,
+//             isActive: isActive !== undefined ? isActive : template.isActive
+//         };
+
+//         const updatedTemplate = await EmailTemplate.findByIdAndUpdate(
+//             req.params.id,
+//             updateData,
+//             { new: true, runValidators: true }
+//         );
+
+//         await Logger.info('updateTemplate', 'Email template updated', { templateId: updatedTemplate._id });
+
+//         res.status(200).json({
+//             success: true,
+//             message: "Template updated successfully",
+//             data: updatedTemplate
+//         });
+//     } catch (error) {
+//         console.error('updateTemplate error:', error);
+//         await Logger.error('updateTemplate', 'Failed to update email template', { message: error.message, stack: error.stack });
+//         res.status(500).json({ success: false, message: error.message });
+//     }
+// };
 exports.updateTemplate = async (req, res) => {
     try {
-        const { name, subject, body, variables, description, isActive } = req.body;
+        const { name, subject, body, description, isActive, type } = req.body;
+
+        console.log("📥 Entering updateTemplate");
+        console.log("📥 Request Params:", req.params);
+        console.log("📥 Request Body:", req.body);
 
         const template = await EmailTemplate.findById(req.params.id);
         if (!template) {
@@ -333,13 +440,18 @@ exports.updateTemplate = async (req, res) => {
             }
         }
 
+        // Auto-detect variables from body
+        const updatedBody = body || template.body;
+        const variables = extractVariables(updatedBody);
+
         const updateData = {
             name: name || template.name,
             subject: subject || template.subject,
-            body: body || template.body,
-            variables: variables || template.variables,
+            body: updatedBody,
+            variables,
             description: description || template.description,
-            isActive: isActive !== undefined ? isActive : template.isActive
+            isActive: isActive !== undefined ? isActive : template.isActive,
+            type: type || template.type
         };
 
         const updatedTemplate = await EmailTemplate.findByIdAndUpdate(
@@ -348,6 +460,8 @@ exports.updateTemplate = async (req, res) => {
             { new: true, runValidators: true }
         );
 
+        console.log("✅ Template updated successfully:", updatedTemplate);
+
         await Logger.info('updateTemplate', 'Email template updated', { templateId: updatedTemplate._id });
 
         res.status(200).json({
@@ -355,6 +469,7 @@ exports.updateTemplate = async (req, res) => {
             message: "Template updated successfully",
             data: updatedTemplate
         });
+
     } catch (error) {
         console.error('updateTemplate error:', error);
         await Logger.error('updateTemplate', 'Failed to update email template', { message: error.message, stack: error.stack });
