@@ -1,5 +1,5 @@
 // controllers/auditLogController.js
-const AuditLog = require('../models/AuditLog.js');
+const AuditLog = require('../models/Logs.js');
 const Logger = require('../utils/auditLog.js');
 
 // Create Log Entry

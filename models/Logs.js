@@ -65,4 +65,4 @@ logSchema.index({ createdAt: -1 });
 logSchema.index({ surveyId: 1 });
 logSchema.index({ userId: 1 });
 
-module.exports = mongoose.models['Logs'] || mongoose.model('Logs', logSchema);
+module.exports = mongoose.model('Logs', logSchema);

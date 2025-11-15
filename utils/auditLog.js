@@ -1,5 +1,5 @@
 // // utils/auditLog.js
-// const AuditLog = require('../models/AuditLog.js');
+// const AuditLog = require('../models/Logs.js');
 
 // class Logger {
 //   static async log(functionName, message, logLevel = 'INFO', additionalData = {}) {
@@ -64,7 +64,7 @@
 
 // module.exports = Logger;
 // utils/auditLog.js
-const AuditLog = require('../models/AuditLog');
+const AuditLog = require('../models/Logs');
 
 class Logger {
   static async log(functionName, message, logLevel = 'INFO', additionalData = {}) {

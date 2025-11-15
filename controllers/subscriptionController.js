@@ -1,6 +1,6 @@
 // controllers/subscriptionController.js
 const Subscription = require("../models/Subscription");
-const Log = require("../models/auditLog");
+const Log = require("../models/Logs");
 const mongoose = require("mongoose");
 
 // OPTIMIZED LOGGING HELPER FUNCTION
