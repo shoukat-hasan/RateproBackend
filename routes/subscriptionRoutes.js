@@ -71,5 +71,4 @@ router.get("/admin/plans", getAllSubscriptionPlans);
 router.put("/admin/plans/:planId", updateSubscriptionPlan);
 router.delete("/admin/plans/:planId", deleteSubscriptionPlan);
 
-
 module.exports = router;
