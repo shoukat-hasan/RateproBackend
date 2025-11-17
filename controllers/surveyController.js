@@ -40,170 +40,6 @@ const createSchema = Joi.object({
     }).optional(),
 });
 
-// ===== CREATE SURVEY =====
-// exports.createSurvey = async (req, res, next) => {
-//     try {
-//         let { title, description, category, questions, settings, themeColor, status } = req.body;
-
-//         // parse possible JSON strings
-//         if (typeof questions === "string") questions = JSON.parse(questions);
-//         if (typeof settings === "string") settings = JSON.parse(settings);
-
-//         // normalize question IDs
-//         const normalizedQuestions = (questions || []).map((q) => ({
-//             ...q,
-//             id: q.id,
-//         }));
-
-//         const newSurvey = new Survey({
-//             title,
-//             description,
-//             category,
-//             questions: normalizedQuestions,
-//             status: status || "active",
-//             settings,
-//             themeColor,
-//             createdBy: req.user._id,
-//             tenant: req.tenantId,
-//         });
-
-//         // --- logo upload if available ---
-//         if (req.file) {
-//             try {
-//                 const result = await cloudinary.uploader.upload(req.file.path, {
-//                     folder: "survey-logos",
-//                 });
-//                 newSurvey.logo = {
-//                     url: result.secure_url,
-//                     public_id: result.public_id,
-//                 };
-//                 fs.unlinkSync(req.file.path);
-//                 await Logger.info("createSurvey: Logo uploaded", {
-//                     fileName: req.file.filename,
-//                     cloudPublicId: result.public_id,
-//                 });
-//             } catch (uploadErr) {
-//                 await Logger.error("createSurvey: Logo upload failed", {
-//                     error: uploadErr.message,
-//                 });
-//                 if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
-//                 return res.status(500).json({ message: "Failed to upload logo" });
-//             }
-//         }
-
-//         // --- hash password if survey is password-protected ---
-//         if (settings?.isPasswordProtected && settings.password) {
-//             newSurvey.settings.password = await bcrypt.hash(
-//                 String(settings.password),
-//                 10
-//             );
-//         }
-
-//         const savedSurvey = await newSurvey.save();
-
-//         await Logger.info("createSurvey: Survey created successfully", {
-//             surveyId: savedSurvey._id,
-//             createdBy: req.user._id,
-//             tenantId: req.tenantId,
-//         });
-
-//         res
-//             .status(201)
-//             .json({ message: "Survey created successfully", survey: savedSurvey });
-//     } catch (err) {
-//         if (req.file && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
-//         await Logger.error("createSurvey: Error", {
-//             error: err.message,
-//             stack: err.stack,
-//             userId: req.user?._id,
-//             tenantId: req.tenantId,
-//         });
-//         next(err);
-//     }
-// };
-// exports.createSurvey = async (req, res, next) => {
-//     try {
-//         const { error, value } = createSchema.validate(req.body);
-//         if (error) {
-//             if (req.file) fs.unlinkSync(req.file.path);
-//             return res.status(400).json({ message: error.details[0].message });
-//         }
-
-//         const {
-//             title, description, category, questions, settings, themeColor,
-//             status, targetAudience, schedule
-//         } = value;
-
-//         const normalizedQuestions = questions.map(q => ({ ...q, id: q.id || String(new mongoose.Types.ObjectId()) }));
-
-//         const newSurvey = new Survey({
-//             title, description, category, questions: normalizedQuestions,
-//             settings, themeColor,
-//             createdBy: req.user._id,
-//             tenant: req.tenantId,
-//             status: "draft", // hamesha draft se start
-//             targetAudience: targetAudience || null,
-//             schedule: schedule || null,
-//         });
-
-//         // Logo upload (tumhara purana code yahan paste kar do)
-//         if (req.file) {
-//             const result = await cloudinary.uploader.upload(req.file.path, { folder: "survey_logos" });
-//             newSurvey.logo = { public_id: result.public_id, url: result.secure_url };
-//             fs.unlinkSync(req.file.path);
-//         }
-
-//         // Password hash (agar protected)
-//         if (settings?.isPasswordProtected && settings?.password) {
-//             newSurvey.settings.password = await bcrypt.hash(settings.password, 10);
-//         }
-
-//         // Agar direct publish karna hai
-//         if (status === "active") {
-//             if (!targetAudience || !schedule) {
-//                 return res.status(400).json({ message: "Target audience aur schedule zaroori hain publish ke liye" });
-//             }
-
-//             newSurvey.targetAudience = targetAudience;
-//             newSurvey.schedule = schedule;
-
-//             const now = new Date();
-//             if (new Date(schedule.startDate) <= now && schedule.autoPublish) {
-//                 newSurvey.status = "active";
-//                 newSurvey.schedule.publishedAt = now;
-//                 newSurvey.publishLog.push({
-//                     publishedBy: req.user._id,
-//                     method: "manual",
-//                     recipientsCount: (targetAudience.phones?.length || 0) + (targetAudience.emails?.length || 0)
-//                 });
-
-//                 // Immediate distribution
-//                 const recipients = [...(targetAudience.phones || []), ...(targetAudience.emails || [])];
-//                 if (recipients.length > 0) {
-//                     const mockReq = {
-//                         body: { surveyId: newSurvey._id, recipients },
-//                         tenantId: req.tenantId
-//                     };
-//                     await require('./distributionController').sendSurveyWhatsApp(mockReq, res, next);
-//                 }
-//             } else {
-//                 newSurvey.status = "scheduled";
-//             }
-//         }
-
-//         const savedSurvey = await newSurvey.save();
-//         await Logger.info("Survey created", { surveyId: savedSurvey._id, status: savedSurvey.status });
-//         res.status(201).json({
-//             message: status === "active" ? "Survey published!" : "Draft saved!",
-//             survey: savedSurvey
-//         });
-
-//     } catch (err) {
-//         await Logger.error("createSurvey error", { error: err.message });
-//         next(err);
-//     }
-// };
-
 exports.createSurvey = async (req, res) => {
     try {
         const { targetAudience, publishSettings, questions, ...surveyData } = req.body;
@@ -1758,3 +1594,168 @@ exports.autoPublishScheduledSurveys = async () => {
         });
     }
 };
+
+
+// ===== CREATE SURVEY =====
+// exports.createSurvey = async (req, res, next) => {
+//     try {
+//         let { title, description, category, questions, settings, themeColor, status } = req.body;
+
+//         // parse possible JSON strings
+//         if (typeof questions === "string") questions = JSON.parse(questions);
+//         if (typeof settings === "string") settings = JSON.parse(settings);
+
+//         // normalize question IDs
+//         const normalizedQuestions = (questions || []).map((q) => ({
+//             ...q,
+//             id: q.id,
+//         }));
+
+//         const newSurvey = new Survey({
+//             title,
+//             description,
+//             category,
+//             questions: normalizedQuestions,
+//             status: status || "active",
+//             settings,
+//             themeColor,
+//             createdBy: req.user._id,
+//             tenant: req.tenantId,
+//         });
+
+//         // --- logo upload if available ---
+//         if (req.file) {
+//             try {
+//                 const result = await cloudinary.uploader.upload(req.file.path, {
+//                     folder: "survey-logos",
+//                 });
+//                 newSurvey.logo = {
+//                     url: result.secure_url,
+//                     public_id: result.public_id,
+//                 };
+//                 fs.unlinkSync(req.file.path);
+//                 await Logger.info("createSurvey: Logo uploaded", {
+//                     fileName: req.file.filename,
+//                     cloudPublicId: result.public_id,
+//                 });
+//             } catch (uploadErr) {
+//                 await Logger.error("createSurvey: Logo upload failed", {
+//                     error: uploadErr.message,
+//                 });
+//                 if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+//                 return res.status(500).json({ message: "Failed to upload logo" });
+//             }
+//         }
+
+//         // --- hash password if survey is password-protected ---
+//         if (settings?.isPasswordProtected && settings.password) {
+//             newSurvey.settings.password = await bcrypt.hash(
+//                 String(settings.password),
+//                 10
+//             );
+//         }
+
+//         const savedSurvey = await newSurvey.save();
+
+//         await Logger.info("createSurvey: Survey created successfully", {
+//             surveyId: savedSurvey._id,
+//             createdBy: req.user._id,
+//             tenantId: req.tenantId,
+//         });
+
+//         res
+//             .status(201)
+//             .json({ message: "Survey created successfully", survey: savedSurvey });
+//     } catch (err) {
+//         if (req.file && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+//         await Logger.error("createSurvey: Error", {
+//             error: err.message,
+//             stack: err.stack,
+//             userId: req.user?._id,
+//             tenantId: req.tenantId,
+//         });
+//         next(err);
+//     }
+// };
+// exports.createSurvey = async (req, res, next) => {
+//     try {
+//         const { error, value } = createSchema.validate(req.body);
+//         if (error) {
+//             if (req.file) fs.unlinkSync(req.file.path);
+//             return res.status(400).json({ message: error.details[0].message });
+//         }
+
+//         const {
+//             title, description, category, questions, settings, themeColor,
+//             status, targetAudience, schedule
+//         } = value;
+
+//         const normalizedQuestions = questions.map(q => ({ ...q, id: q.id || String(new mongoose.Types.ObjectId()) }));
+
+//         const newSurvey = new Survey({
+//             title, description, category, questions: normalizedQuestions,
+//             settings, themeColor,
+//             createdBy: req.user._id,
+//             tenant: req.tenantId,
+//             status: "draft", // hamesha draft se start
+//             targetAudience: targetAudience || null,
+//             schedule: schedule || null,
+//         });
+
+//         // Logo upload (tumhara purana code yahan paste kar do)
+//         if (req.file) {
+//             const result = await cloudinary.uploader.upload(req.file.path, { folder: "survey_logos" });
+//             newSurvey.logo = { public_id: result.public_id, url: result.secure_url };
+//             fs.unlinkSync(req.file.path);
+//         }
+
+//         // Password hash (agar protected)
+//         if (settings?.isPasswordProtected && settings?.password) {
+//             newSurvey.settings.password = await bcrypt.hash(settings.password, 10);
+//         }
+
+//         // Agar direct publish karna hai
+//         if (status === "active") {
+//             if (!targetAudience || !schedule) {
+//                 return res.status(400).json({ message: "Target audience aur schedule zaroori hain publish ke liye" });
+//             }
+
+//             newSurvey.targetAudience = targetAudience;
+//             newSurvey.schedule = schedule;
+
+//             const now = new Date();
+//             if (new Date(schedule.startDate) <= now && schedule.autoPublish) {
+//                 newSurvey.status = "active";
+//                 newSurvey.schedule.publishedAt = now;
+//                 newSurvey.publishLog.push({
+//                     publishedBy: req.user._id,
+//                     method: "manual",
+//                     recipientsCount: (targetAudience.phones?.length || 0) + (targetAudience.emails?.length || 0)
+//                 });
+
+//                 // Immediate distribution
+//                 const recipients = [...(targetAudience.phones || []), ...(targetAudience.emails || [])];
+//                 if (recipients.length > 0) {
+//                     const mockReq = {
+//                         body: { surveyId: newSurvey._id, recipients },
+//                         tenantId: req.tenantId
+//                     };
+//                     await require('./distributionController').sendSurveyWhatsApp(mockReq, res, next);
+//                 }
+//             } else {
+//                 newSurvey.status = "scheduled";
+//             }
+//         }
+
+//         const savedSurvey = await newSurvey.save();
+//         await Logger.info("Survey created", { surveyId: savedSurvey._id, status: savedSurvey.status });
+//         res.status(201).json({
+//             message: status === "active" ? "Survey published!" : "Draft saved!",
+//             survey: savedSurvey
+//         });
+
+//     } catch (err) {
+//         await Logger.error("createSurvey error", { error: err.message });
+//         next(err);
+//     }
+// };

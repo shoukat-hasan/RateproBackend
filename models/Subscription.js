@@ -120,47 +120,71 @@ const mongoose = require("mongoose");
 
 const subscriptionSchema = new mongoose.Schema(
   {
-    name: { type: String, required: true },
-    price: { type: Number, required: true, default: 0 },
-    credits: { type: Number, required: true, default: 0 },
-    features: [{ type: String }],
+    tenant: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Tenant",
+      required: function () { return !this.isTemplate; },
+      index: true,
+      sparse: true,
+    },
+    planTemplate: { type: mongoose.Schema.Types.ObjectId, ref: "Subscription" },
+    name: {
+      type: String,
+      required: true,
+      enum: ['Free', 'Starter', 'Pro', 'Agency', 'Premium', 'Enterprise',
+        'Beginner', 'Advanced', 'Professional', 'Business', 'Basic'] // predefined plan names,
+    },
+    price: {
+      type: Number,
+      required: true,
+      default: 0
+    },
+    credits: {
+      type: Number,
+      required: true,
+      default: 0
+    },
+    features: [{
+      type: String
+    }],
     billingCycle: {
       type: String,
-      enum: ["monthly", "yearly"],
-      default: "monthly",
+      enum: ['monthly', 'yearly'],
+      default: 'monthly'
     },
-    description: String,
-    isActive: { type: Boolean, default: true },
-    isTemplate: { type: Boolean, default: false }, // ✅ Admin plans vs Tenant copies
-
-    // Tenant-level usage
-    tenant: { type: mongoose.Schema.Types.ObjectId, ref: "Tenant" },
-    planTemplate: { type: mongoose.Schema.Types.ObjectId, ref: "Subscription" },
-
-    // Subscription lifecycle
-    status: {
-      type: String,
-      enum: ["active", "expired", "cancelled", "pending"],
-      default: "pending",
+    isActive: {
+      type: Boolean,
+      default: true
     },
-    startDate: Date,
-    endDate: Date,
-    cancelledAt: Date,
-    cancelledBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
-    activatedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
-    activatedAt: Date,
-
-    // Payment & metadata
-    paymentDetails: { type: Object },
-    cancellationReason: String,
-    feedback: String,
-    autoRenew: { type: Boolean, default: false },
-
-    // Audit fields
+    description: {
+      type: String
+    },
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
     updatedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+
+    subscriptionType: {
+      type: String,
+      enum: ['tenant', 'individual', null], // null for templates
+      default: null,
+      index: true
+    },
+    isTemplate: { type: Boolean, default: false, index: true },
+    startDate: { type: Date, },
+    endDate: { type: Date, },
   },
   { timestamps: true }
 );
+
+subscriptionSchema.pre("save", async function (next) {
+  // Agar ye template nahi hai aur tenant nahi set hai
+  if (!this.isTemplate && !this.tenant && this.createdBy) {
+    const creator = await mongoose.model("User").findById(this.createdBy);
+    if (creator && (creator.role === "companyAdmin" || creator.role === "admin")) {
+      this.tenant = creator.tenant;
+      this.subscriptionType = "tenant";
+    }
+  }
+  next();
+});
 
 module.exports = mongoose.model("Subscription", subscriptionSchema);
