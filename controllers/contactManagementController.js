@@ -5,6 +5,8 @@ const ExcelJS = require('exceljs');
 const PDFDocument = require("pdfkit");
 const path = require('path');
 const fs = require("fs");
+const XLSX = require('xlsx');
+const Logger = require("../utils/auditLog");
 
 // GET /api/contacts
 exports.getContacts = async (req, res) => {
@@ -81,29 +83,141 @@ exports.getContactById = async (req, res) => {
     }
 };
 
+// Bulk create contacts from Excel
+exports.bulkCreateContacts = async (req, res) => {
+    try {
+        const currentUser = req.user;
+        
+        // Role check
+        if (currentUser.role !== 'companyAdmin') {
+            return res.status(403).json({ message: 'Access denied: Only CompanyAdmin can perform bulk upload' });
+        }
+
+        // File check
+        if (!req.file) {
+            return res.status(400).json({ message: 'No Excel file uploaded' });
+        }
+
+        // Read Excel
+        const workbook = XLSX.read(req.file.buffer, { type: 'buffer' });
+        const sheetName = workbook.SheetNames[0];
+
+        const worksheet = workbook.Sheets[sheetName];
+        const rows = XLSX.utils.sheet_to_json(worksheet, { header: 1, blankrows: false });
+
+        if (rows.length < 2) {
+            return res.status(400).json({ message: 'Empty or invalid Excel file. Must have at least one data row.' });
+        }
+
+        const dataRows = rows.slice(1);
+        const tenantId = currentUser.tenant._id ? currentUser.tenant._id.toString() : currentUser.tenant;
+
+        const successes = [];
+        const errors = [];
+
+        for (let i = 0; i < dataRows.length; i++) {
+            const row = dataRows[i];
+            const [name, email, phone, company, segmentName, tags, statusStr] = row.map(
+                val => val?.toString().trim() || ''
+            );
+
+            if (!name || !email) {
+                errors.push({ row: row.join(','), message: 'Name and Email are required' });
+                continue;
+            }
+
+            // Segment check / create
+            let segmentDoc = null;
+
+            if (segmentName) {
+                segmentDoc = await AudienceSegment.findOne({ tenantId, name: segmentName });
+                if (!segmentDoc) {
+                    console.log(`⚠️ Segment "${segmentName}" not found for email ${email}. Contact created without segment.`);
+                } else {
+                    segmentDoc.size += 1;
+                    await segmentDoc.save();
+                }
+            }
+
+            // Check duplicate email
+            const existingContact = await Contact.findOne({ email, tenantId });
+            if (existingContact) {
+                errors.push({ email, message: 'Contact already exists with this email' });
+                continue;
+            }
+
+            // Create contact
+            const newContact = await Contact.create({
+                tenantId,
+                name,
+                email,
+                phone,
+                company,
+                segment: segmentDoc ? segmentDoc._id : null,
+                tags,
+                status: statusStr || 'Active',
+                lastActivity: new Date(),
+            });
+
+            successes.push({ id: newContact._id, email: newContact.email });
+        }
+
+        // Logging
+        await Logger.info({
+            user: currentUser._id,
+            action: "Bulk Create Contacts",
+            status: "Success",
+            details: `Processed: ${dataRows.length}, Success: ${successes.length}, Failed: ${errors.length}`
+        });
+
+        res.status(201).json({
+            message: 'Bulk contact creation completed',
+            totalProcessed: dataRows.length,
+            successful: successes.length,
+            failed: errors.length,
+            createdContacts: successes,
+            errors: errors.length > 0 ? errors : null,
+        });
+
+    } catch (err) {
+        console.error("❌ BulkCreateContacts error:", err);
+
+        await Logger.error({
+            user: req.user?._id,
+            action: "Bulk Create Contacts",
+            status: "Failed",
+            details: err.message,
+        });
+
+        res.status(500).json({ message: 'Internal Server Error', error: err.message });
+    }
+};
+
 // POST /api/contacts
 exports.createContact = async (req, res) => {
     try {
         const { name, email, phone, company, segment, tags, status } = req.body;
 
-        let segmentDoc = null;
+        let segmentId = null;
+        if (segment) {
+            segmentId = typeof segment === "string" ? segment : segment._id;
+        }
 
-        // Segment check with tenant protection
-        if (segment && segment._id) {
+        if (segmentId) {
             segmentDoc = await AudienceSegment.findOne({
-                _id: segment._id,
+                _id: segmentId,
                 tenantId: req.tenantId
             });
-
             if (!segmentDoc) {
                 return res.status(403).json({
                     message: "Invalid segment or you don't have permission"
                 });
             }
-
-            // Increase segment size
             segmentDoc.size += 1;
             await segmentDoc.save();
+
+        } else {
+            console.log("ℹ️ No segment provided, proceeding without segment");
         }
 
         // Create contact with tenantId
@@ -127,6 +241,7 @@ exports.createContact = async (req, res) => {
         res.status(201).json(contactWithSegment);
 
     } catch (err) {
+        console.error("❌ Error creating contact:", err);
         res.status(500).json({ message: err.message });
     }
 };
@@ -136,74 +251,85 @@ exports.updateContact = async (req, res) => {
     try {
         const { name, email, phone, company, segment, tags, status } = req.body;
 
-        // Contact must belong to same tenant
         let contact = await Contact.findOne({
             _id: req.params.id,
             tenantId: req.tenantId
-        });
+        }).populate('segment');
 
         if (!contact) {
-            return res.status(404).json({
-                message: "Contact not found or you don't have permission"
-            });
+            return res.status(404).json({ message: "Contact not found" });
         }
 
-        const oldSegmentId = contact.segment?.toString() || null;
-        const newSegmentId = segment?._id || null;
+        const oldSegmentId = contact.segment?._id?.toString() || null;
 
-        /** CASE 1: Segment changed */
+        // ← YEH SABSE STRONG FIX HAI (string, object, mongoose doc – sab handle karega)
+        let newSegmentId = null;
+        if (segment) {
+            if (typeof segment === 'string' && segment.trim() !== '') {
+                newSegmentId = segment.trim();
+            }
+            else if (segment && segment._id) {
+                newSegmentId = segment._id.toString();
+            }
+            else if (segment && segment.id) {
+                newSegmentId = segment.id.toString();
+            }
+        }
+
+        // Agar segment change hua hai
         if (oldSegmentId !== newSegmentId) {
 
-            // Decrease old segment size (only if belongs to this tenant)
+            // Purana segment size ghataye
             if (oldSegmentId) {
-                await AudienceSegment.findOneAndUpdate(
+                await AudienceSegment.updateOne(
                     { _id: oldSegmentId, tenantId: req.tenantId },
                     { $inc: { size: -1 } }
                 );
             }
 
-            // Increase new segment size (must belong to this tenant)
+            // Naya segment size badhaye + valid hai ya nahi check
             if (newSegmentId) {
-
-                const newSegmentDoc = await AudienceSegment.findOne({
+                const segmentDoc = await AudienceSegment.findOne({
                     _id: newSegmentId,
                     tenantId: req.tenantId
                 });
 
-                if (!newSegmentDoc) {
-                    return res.status(403).json({
-                        message: "Invalid segment or you don't have permission"
+                if (!segmentDoc) {
+                    return res.status(400).json({
+                        message: "Segment not found ya aapka tenant ka nahi hai!"
                     });
                 }
 
-                await AudienceSegment.findByIdAndUpdate(
-                    newSegmentId,
+                await AudienceSegment.updateOne(
+                    { _id: newSegmentId },
                     { $inc: { size: 1 } }
                 );
-            }
 
-            contact.segment = newSegmentId;
+                contact.segment = newSegmentId; // ← yeh line important hai
+            } else {
+                contact.segment = null;
+            }
         }
 
-        /** NORMAL FIELD UPDATES */
-        contact.name = name ?? contact.name;
-        contact.email = email ?? contact.email;
-        contact.phone = phone ?? contact.phone;
-        contact.company = company ?? contact.company;
-        contact.tags = tags ?? contact.tags;
-        contact.status = status ?? contact.status;
-        contact.lastActivity = new Date();
+        // Baaki fields
+        if (name !== undefined) contact.name = name;
+        if (email !== undefined) contact.email = email;
+        if (phone !== undefined) contact.phone = phone;
+        if (company !== undefined) contact.company = company;
+        if (tags !== undefined) contact.tags = tags;
+        if (status !== undefined) contact.status = status;
 
+        contact.lastActivity = new Date();
         await contact.save();
 
-        const updatedContact = await Contact.findOne({
-            _id: contact._id,
-            tenantId: req.tenantId
-        }).populate("segment", "name size");
+        // Final populated response
+        const finalContact = await Contact.findById(contact._id)
+            .populate('segment', 'name size');
 
-        res.json(updatedContact);
+        res.json(finalContact);
 
     } catch (err) {
+        console.error(err);
         res.status(500).json({ message: err.message });
     }
 };
