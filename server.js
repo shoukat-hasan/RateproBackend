@@ -83,6 +83,8 @@ app.use("/api/distribution", require("./routes/distributionRoutes"));
 app.use("/api/dashboard", require("./routes/dashboardRoutes"));
 app.use("/api/tickets", require("./routes/ticketRoutes"));
 app.use("/api/email-templates", require("./routes/emailTemplateRoutes.js"));
+app.use("/api/segments", require("./routes/audienceSegmentRoutes.js"));
+app.use("/api/contacts", require("./routes/contactManagementRoutes.js"));
 
 cron.schedule('*/5 * * * *', () => {
   require('./controllers/surveyController').autoPublishScheduledSurveys();
