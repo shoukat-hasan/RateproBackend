@@ -2033,6 +2033,13 @@ exports.bulkCreateUsers = async (req, res) => {
               details: `Welcome email sent to ${email}`,
             });
           } catch (emailError) {
+            await Logger.warning({
+              user: req.user?._id,
+              action: functionName,
+              status: "EmailFailed",
+              details: `Template email failed for ${email}, sending basic email. Error: ${emailError.message}`,
+            });
+            
             // 📨 Fallback basic email
             const fallbackHTML = `
               <p>Hello ${name},</p>
@@ -2092,234 +2099,6 @@ exports.bulkCreateUsers = async (req, res) => {
 };
 
 // Create User with Role-Based and Tenant-Based Restrictions
-// exports.createUser = async (req, res) => {
-//   try {
-//     // Validate request
-//     const { error } = createUserSchema.validate(req.body);
-//     if (error) return res.status(400).json({ message: error.details[0].message });
-
-//     const { name, email, password, role, tenant, department, tenantName } = req.body;
-//     const currentUser = req.user;
-
-//     // Check existing user
-//     if (await User.findOne({ email })) {
-//       return res.status(400).json({ message: 'User already exists with this email.' });
-//     }
-
-//     // Role restrictions
-//     if (currentUser.role === 'admin' && !['companyAdmin', 'user'].includes(role)) {
-//       return res.status(403).json({ message: 'Admin can only create CompanyAdmin or User.' });
-//     }
-//     if (currentUser.role === 'companyAdmin' && role !== 'member') {
-//       return res.status(403).json({ message: 'CompanyAdmin can only create Member role.' });
-//     }
-
-//     // Member permissions
-//     if (currentUser.role === 'member') {
-//       const populatedUser = await User.findById(currentUser._id).populate({
-//         path: "customRoles",
-//         populate: { path: "permissions" }
-//       });
-//       if (!populatedUser) return res.status(404).json({ message: "User not found" });
-
-//       const hasPermission = populatedUser.customRoles?.some(
-//         (r) => r.permissions?.some(p => p.name === "user:create")
-//       );
-
-//       if (!hasPermission) {
-//         return res.status(403).json({ message: "Access denied: Permission 'user:create' required" });
-//       }
-//     }
-
-//     // Tenant validation
-//     let tenantId = tenant;
-//     if (currentUser.role === 'companyAdmin' && role === 'member') {
-//       if (!currentUser.tenant) return res.status(403).json({ message: 'No tenant associated' });
-//       const userTenantId = currentUser.tenant._id?.toString() || currentUser.tenant;
-//       tenantId = tenant || userTenantId;
-//       if (tenant && tenant !== userTenantId) return res.status(403).json({ message: 'Invalid tenant' });
-//     }
-
-//     // Department check
-//     if (role === 'member' && department) {
-//       if (!mongoose.Types.ObjectId.isValid(tenantId)) {
-//         return res.status(400).json({ message: 'Invalid tenant ID' });
-//       }
-//       const tenantData = await Tenant.findById(tenantId).populate('departments');
-//       if (!tenantData || !tenantData.departments.some(d => d._id.toString() === department)) {
-//         return res.status(400).json({ message: 'Invalid department for this tenant' });
-//       }
-//     }
-
-//     // User categories
-//     let userCategories = [];
-//     if (req.body.userCategories?.length) {
-//       const validCategories = await UserCategory.find({
-//         _id: { $in: req.body.userCategories },
-//         tenant: tenantId,
-//         active: true,
-//       });
-
-//       if (validCategories.length !== req.body.userCategories.length) {
-//         return res.status(400).json({ message: 'Invalid or unauthorized user categories' });
-//       }
-
-//       userCategories = validCategories.map(c => c._id);
-//     }
-
-//     // Hash password
-//     const hashedPassword = await bcrypt.hash(password, 10);
-//     let newUser;
-
-//     if (role === 'companyAdmin') {
-//       const tempUser = new User({
-//         name, email, password: hashedPassword, role, tenant: null, department: null,
-//         isVerified: false, createdBy: currentUser._id,
-//       });
-//       await tempUser.save({ validateBeforeSave: false });
-
-//       const newTenant = await Tenant.create({
-//         name: tenantName?.trim() || `${name}'s Company`,
-//         admin: tempUser._id,
-//         createdBy: currentUser._id,
-//       });
-
-//       tempUser.tenant = newTenant._id;
-//       await tempUser.save();
-//       newUser = tempUser;
-//       tenantId = newTenant._id;
-
-//     } else {
-//       newUser = await User.create({
-//         name, email, password: hashedPassword, role, tenant: tenantId,
-//         department: role === 'member' ? department : null,
-//         isVerified: false, createdBy: currentUser._id,
-//         userCategories,
-//         userType: userCategories.some(id => validCategories.find(c => c._id.toString() === id.toString())?.type === 'external') ? 'external' : 'internal'
-//       });
-//     }
-
-//     // // OTP + verification email
-//     // const verificationCode = generateOTP();
-//     // const expiresAt = moment().add(process.env.OTP_EXPIRE_MINUTES || 15, 'minutes').toDate();
-//     // await OTP.create({ email, code: verificationCode, purpose: 'verify', expiresAt });
-
-//     // const baseURL = role === 'user' ? getBaseURL().public : getBaseURL().admin;
-//     // const verificationLink = `${baseURL}/verify-email?code=${verificationCode}&email=${encodeURIComponent(email)}`;
-
-//     // await sendEmail({
-//     //   to: email,
-//     //   subject: 'Verify your email - RatePro',
-//     //   html: `
-//     //     <p>Hello ${name},</p>
-//     //     <p>Your account has been successfully created.</p>
-//     //     <p><strong>Login Email:</strong> ${email}</p>
-//     //     <p><strong>Temporary Password:</strong> ${password}</p>
-//     //     <p>Please verify your email: <a href="${verificationLink}" target="_blank">${verificationLink}</a></p>
-//     //     <p>This code will expire in ${process.env.OTP_EXPIRE_MINUTES} minute(s).</p>
-//     //     <br/><p>Regards,<br/>Team</p>
-//     //   `,
-//     // });
-
-//     // // ✅ Success log
-//     // await Logger.info({
-//     //   user: currentUser._id,
-//     //   action: "Create User",
-//     //   status: "Success",
-//     //   details: `User ${email} created with role ${role} by ${currentUser._id}`
-//     // });
-//     // OTP
-//     const verificationCode = generateOTP();
-//     const expiresAt = moment().add(process.env.OTP_EXPIRE_MINUTES || 15, 'minutes').toDate();
-//     await OTP.create({ email, code: verificationCode, purpose: 'verify', expiresAt });
-
-//     const baseURLs = getBaseURL();
-//     const baseURL = role === 'user' ? baseURLs.public : baseURLs.admin;
-//     const verificationLink = `${baseURL}/verify-email?code=${verificationCode}&email=${encodeURIComponent(email)}`;
-//     const loginLink = `${baseURL}/login`;
-
-//     // Get company name for email
-//     let companyName = "Our Platform";
-//     if (role === 'companyAdmin' && newTenant) {
-//       companyName = newTenant.name;
-//     } else if (tenantId) {
-//       const tenantData = await Tenant.findById(tenantId);
-//       companyName = tenantData?.name || "Our Platform";
-//     }
-
-//     // 📧 SEND EMAIL USING TEMPLATE
-//     try {
-//       await sendEmail({
-//         to: email,
-//         templateType: "user_welcome", // Ye database ke template type se match karega
-//         templateData: {
-//           userName: name,
-//           userEmail: email,
-//           userPassword: password, // Temporary password
-//           companyName: companyName,
-//           loginLink: loginLink,
-//           verificationLink: verificationLink
-//         }
-//       });
-
-//       await Logger.info(functionName, 'Welcome email sent using template', {
-//         userId: req.user?._id,
-//         newUserId: newUser._id,
-//         email,
-//         templateType: "user_welcome"
-//       });
-
-//     } catch (emailError) {
-//       // Agar template nahi mila ya email fail hui, to fallback to basic email
-//       await Logger.warning(functionName, 'Template email failed, sending basic email', {
-//         userId: req.user?._id,
-//         error: emailError.message
-//       });
-
-//       const fallbackHTML = `
-//         <p>Hello ${name},</p>
-//         <p>Your account has been successfully created.</p>
-//         <p><strong>Login Email:</strong> ${email}</p>
-//         <p><strong>Temporary Password:</strong> ${password}</p>
-//         <p>Please verify your email by clicking the link below:</p>
-//         <p><a href="${verificationLink}" target="_blank">${verificationLink}</a></p>
-//         <p>This code will expire in ${process.env.OTP_EXPIRE_MINUTES} minute(s).</p>
-//         <br/>
-//         <p>Regards,<br/>Team ${companyName}</p>
-//       `;
-
-//       await sendEmail({
-//         to: email,
-//         subject: 'Verify your email - RatePro',
-//         html: fallbackHTML,
-//       });
-//     }
-
-//     res.status(201).json({
-//       message: 'User created successfully. Verification email sent.',
-//       user: {
-//         id: newUser._id,
-//         email: newUser.email,
-//         role: newUser.role,
-//         tenant: newUser.tenant,
-//         isVerified: newUser.isVerified,
-//       },
-//     });
-
-//   } catch (err) {
-//     console.error('CreateUser error:', err);
-
-//     // 🔴 Only catch block logs
-//     await Logger.error({
-//       user: req.user?._id,
-//       action: "Create User",
-//       status: "Failed",
-//       details: err.message,
-//     });
-
-//     res.status(500).json({ message: 'Internal Server Error' });
-//   }
-// };
 exports.createUser = async (req, res) => {
   try {
     // ✅ 1. Input Validation
@@ -2492,7 +2271,7 @@ exports.createUser = async (req, res) => {
       });
 
     } catch (emailError) {
-      // ⚠️ 14. Email Fallback (Basic HTML)
+      //  ⚠️ 14. Email Fallback (Basic HTML)
       await Logger.warning('createUser', 'Template email failed, sending basic email', {
         userId: req.user?._id,
         error: emailError.message
@@ -2543,7 +2322,6 @@ exports.createUser = async (req, res) => {
     res.status(500).json({ message: 'Internal Server Error' });
   }
 };
-
 
 // Update User with Role-Based and Tenant-Based Restrictions
 exports.updateUser = async (req, res, next) => {
@@ -3069,71 +2847,6 @@ exports.exportUserDataPDF = async (req, res, next) => {
 };
 
 // send notification email to user
-// exports.sendNotification = async (req, res, next) => {
-//   const functionName = 'sendNotification';
-//   try {
-//     const { error: bodyError } = notificationSchema.validate(req.body);
-//     const { error: paramError } = idSchema.validate(req.params);
-//     if (bodyError || paramError) {
-//       await Logger.warn("Invalid request for sendNotification", { error: (bodyError || paramError).details[0].message });
-//       return res.status(400).json({ message: (bodyError || paramError).details[0].message });
-//     }
-
-//     const { subject, message } = req.body;
-//     const user = await User.findById(req.params.id);
-//     if (!user) {
-//       await Logger.warn("User not found in sendNotification", { userId: req.params.id });
-//       return res.status(404).json({ message: "User not found" });
-//     }
-
-//     if (req.user.role !== "admin" && user.tenant && req.tenantId !== user.tenant.toString()) {
-//       await Logger.warn("Access denied due to tenant mismatch", { requesterId: req.user._id, userTenant: user.tenant });
-//       return res.status(403).json({ message: "Access denied: Wrong tenant" });
-//     }
-
-//     // 📧 SEND EMAIL USING TEMPLATE SYSTEM
-//     try {
-//       await sendEmail({
-//         to: user.email,
-//         templateType: "admin_notification",
-//         templateData: {
-//           userName: user.name,
-//           userEmail: user.email,
-//           notificationSubject: subject,
-//           notificationMessage: message,
-//           companyName: "RatePro"
-//         }
-//       });
-
-//       await Logger.info(functionName, 'Notification email sent using template', {
-//         userId: req.user?._id,
-//         targetUserId: req.params.id,
-//         userEmail: user.email,
-//         subject,
-//         templateType: "admin_notification"
-//       });
-
-//     } catch (templateError) {
-//       // Fallback to basic email if template fails
-//       await Logger.warning(functionName, 'Template email failed, using fallback', {
-//         userId: req.user?._id,
-//         targetUserId: req.params.id,
-//         error: templateError.message
-//       });
-
-//       await sendEmail({
-//         to: user.email,
-//         subject: subject,
-//         html: `<p>${message}</p>`,
-//       });
-//     }
-
-//     res.status(200).json({ message: "Notification email sent" });
-//   } catch (err) {
-//     await Logger.error("sendNotification failed", { message: err.message, stack: err.stack });
-//     next(err);
-//   }
-// };
 exports.sendNotification = async (req, res, next) => {
   const functionName = 'sendNotification';
 
@@ -3154,6 +2867,7 @@ exports.sendNotification = async (req, res, next) => {
 
     // 🧠 Step 2: Extract fields from request
     const { subject, message } = req.body;
+    console.log("Sending notification to user ID:", req.body);
     const user = await User.findById(req.params.id);
 
     // ❌ Step 3: Check agar user exist nahi karta
@@ -3174,16 +2888,28 @@ exports.sendNotification = async (req, res, next) => {
 
     // ✉️ Step 5: Try sending email using predefined template
     try {
+      const template = await EmailTemplate.findOne({ type: "custom_notification", isActive: true });
+      if (!template) throw new Error("Email template not found");
+
+      // Auto-map variables safely
+      const templateData = {};
+      template.variables.forEach((v) => {
+        switch (v) {
+          case "userName": templateData[v] = user.name; break;
+          case "userEmail": templateData[v] = user.email; break;
+          case "notificationSubject": templateData[v] = subject; break;
+          case "notificationMessage": templateData[v] = message; break;
+          case "companyName": templateData[v] = "RatePro"; break;
+          case "currentYear": templateData[v] = new Date().getFullYear(); break;
+          default: templateData[v] = ""; // Safe fallback
+        }
+      });
+
       await sendEmail({
         to: user.email,
-        templateType: "admin_notification",
-        templateData: {
-          userName: user.name,
-          userEmail: user.email,
-          notificationSubject: subject,
-          notificationMessage: message,
-          companyName: "RatePro"
-        }
+        subject,
+        templateType: template.type,
+        templateData
       });
 
       await Logger.info(functionName, 'Notification email sent using template', {
@@ -3191,7 +2917,7 @@ exports.sendNotification = async (req, res, next) => {
         targetUserId: req.params.id,
         userEmail: user.email,
         subject,
-        templateType: "admin_notification"
+        templateType: "custom_notification"
       });
 
     } catch (templateError) {

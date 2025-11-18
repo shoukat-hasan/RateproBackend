@@ -3,12 +3,12 @@ const nodemailer = require("nodemailer");
 const EmailTemplate = require("../models/EmailTemplate");
 
 const sendEmail = async ({ to, subject, html, text, templateType, templateData }) => {
-  console.log("📩 [sendEmail] Function triggered...");
-  console.log("📨 Args:", { to, subject, templateType, hasHTML: !!html });
+  // console.log("📩 [sendEmail] Function triggered...");
+  // console.log("📨 Args:", { to, subject, templateType, hasHTML: !!html });
 
   try {
     // -------------------- 1. TRANSPORTER INIT --------------------
-    console.log("⚙️ Creating transporter...");
+    // console.log("⚙️ Creating transporter...");
     const transporter = nodemailer.createTransport({
       host: process.env.SMTP_HOST,
       port: process.env.SMTP_PORT,
@@ -19,13 +19,13 @@ const sendEmail = async ({ to, subject, html, text, templateType, templateData }
       },
     });
 
-    console.log("✔️ Transporter created");
+    // console.log("✔️ Transporter created");
 
     let finalHTML = html;
 
     // -------------------- 2. TEMPLATE HANDLING --------------------
     if (templateType && templateData) {
-      console.log("🧩 Template mode enabled:", templateType);
+      // console.log("🧩 Template mode enabled:", templateType);
       const templateDoc = await EmailTemplate.findOne({ type: templateType, isActive: true });
 
       if (!templateDoc) {
@@ -33,19 +33,19 @@ const sendEmail = async ({ to, subject, html, text, templateType, templateData }
         throw new Error("Email template not found");
       }
 
-      console.log("📄 Template found:", templateDoc.type);
+      // console.log("📄 Template found:", templateDoc.type);
 
       finalHTML = templateDoc.body;
 
-      console.log("🔍 Starting replacements...");
+      // console.log("🔍 Starting replacements...");
       Object.keys(templateData).forEach((key) => {
         const regex = new RegExp(`\\$\\{\\s*${key}\\s*\\}`, "g");
 
-        console.log(`→ Checking key: ${key}`);
+        // console.log(`→ Checking key: ${key}`);
         if (!finalHTML.match(regex)) {
           console.warn(`⚠️ Placeholder not found in template: \${${key}}`);
         } else {
-          console.log(`✔️ Replacing \${${key}} with:`, templateData[key]);
+          // console.log(`✔️ Replacing \${${key}} with:`, templateData[key]);
         }
 
         finalHTML = finalHTML.replace(regex, templateData[key]);
@@ -67,18 +67,18 @@ const sendEmail = async ({ to, subject, html, text, templateType, templateData }
       text,
     };
 
-    console.log("📦 Mail options prepared:", {
-      to: mailOptions.to,
-      subject: mailOptions.subject,
-      htmlLength: mailOptions.html?.length,
-    });
+    // console.log("📦 Mail options prepared:", {
+    //   to: mailOptions.to,
+    //   subject: mailOptions.subject,
+    //   htmlLength: mailOptions.html?.length,
+    // });
 
     // -------------------- 5. SEND EMAIL --------------------
-    console.log("🚀 Sending email...");
+    // console.log("🚀 Sending email...");
     const info = await transporter.sendMail(mailOptions);
 
-    console.log("✅ Email sent successfully!");
-    console.log("📤 Response:", info);
+    // console.log("✅ Email sent successfully!");
+    // console.log("📤 Response:", info);
 
     return info;
 
