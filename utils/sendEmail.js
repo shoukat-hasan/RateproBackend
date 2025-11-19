@@ -37,6 +37,13 @@ const sendEmail = async ({ to, subject, html, text, templateType, templateData }
 
       finalHTML = templateDoc.body;
 
+      finalHTML = finalHTML.replace(
+        /\$\{\s*if\s+([\w]+)\s*===\s*"(\w+)"\s*\?\s*`([\s\S]*?)`\s*:\s*`([\s\S]*?)`\s*\}/g,
+        (match, variable, expected, trueBlock, falseBlock) => {
+          return templateData[variable] === expected ? trueBlock : falseBlock;
+        }
+      );
+
       // console.log("🔍 Starting replacements...");
       Object.keys(templateData).forEach((key) => {
         const regex = new RegExp(`\\$\\{\\s*${key}\\s*\\}`, "g");
